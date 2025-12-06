@@ -1,0 +1,71 @@
+// Inline rules //
+?start: statement_list?
+
+?expr: INT_VALUE -> int_literal
+     | FLOAT_VALUE -> float_literal
+     | "(" expr ")" -> grouped_expr
+     | STRING_VALUE -> str_literal
+     | BOOLEAN_VALUE -> bool_literal
+     | CNAME -> variable_expr
+     | UNARY_OP expr -> unary_expr
+     | expr BIN_OP expr -> binary_expr
+
+// Rules (api basically) //
+
+statement_list: statement (_SEP statement)*
+
+?statement: function_definition
+         | assignment
+         | expr
+         | output
+
+assignment: VAR_TYPE CNAME "=" expr "::" TYPE_NAME -> variable_assignment
+output: _PRINT expr -> print
+
+param: CNAME "::" TYPE_NAME
+
+function_definition: "func" CNAME "(" [ params ] ")" "::" TYPE_NAME body
+params: param ("," param)*
+args: (CNAME ",")*
+
+?body: "{" statement* "}"
+
+INT_VALUE: INT
+FLOAT_VALUE: FLOAT
+STRING_VALUE: ESCAPED_STRING
+_PRINT.8: "print"
+BOOLEAN_VALUE.9: BOOLEAN
+VAR_TYPE.10: "var" | "let"
+// Hidden variables //
+_MULTILINE.12: /;\[(.*?)\];/s
+_SEP.11: NEWLINE
+    | ";"
+
+// Custom types //
+BOOLEAN: "true"
+       | "false"
+BIN_OP: "+" | "-" | "*" | "/" | "^" | "==" | "~=" | "<" | "<=" | ">" | ">="
+UNARY_OP: "+" | "-" | "#"
+
+CNAME.4: /[a-z_][a-z0-9_]*/
+
+
+
+// Public variables //
+CLASS_NAME.5: /[A-Z][A-Za-z0-9_]*/
+TYPE_NAME: "str"
+         | "int"
+         | "float"
+         | "boolean"
+
+// Import //
+%import common.INT
+%import common.FLOAT
+%import common.ESCAPED_STRING
+
+%import common.NEWLINE
+%import common.WS
+
+// Ignore //
+%ignore WS
+%ignore _MULTILINE

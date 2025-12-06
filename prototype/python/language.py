@@ -32,17 +32,17 @@ class Environment():
         else:
             raise NameError(f"{k} not defined")
 
-    def set(self, immutable, k, v):
+    def set(self, var_type, immutable, k, v):
         if k in self.values:
             self.values[k].set(v)
         else:
-            self.values[k] = Variable(immutable, v)
+            self.values[k] = Variable(var_type,immutable,v)
 
 class Variable():
-    def __init__(self,immutable,value):
+    def __init__(self,type,immutable,value):
         self.immutable = immutable == True
         self.value = value
-
+        self.variable_type = type
     def get(self):
         return self.value
 
@@ -53,7 +53,7 @@ class Variable():
             raise PermissionError("Attempt to modify immutable value")
 
 class Expression():
-    def evaluate(self,_):
+    def evaluate(self,_: Environment):
         raise NotImplementedError
     
 class BinaryExpression(Expression):
@@ -81,8 +81,6 @@ class UnaryExpression(Expression):
         operation = unary_ops[self.op]
         return operation(expr)
 
-
-
 class LiteralExpression(Expression):
     def __init__(self,value):
         self.value = value
@@ -97,3 +95,38 @@ class VariableExpression(Expression):
     def evaluate(self,env):
         var = env.get(self.name)
         return var.get()
+    
+class Statement():
+    def evaluate(self, _: Environment):
+        raise NotImplementedError
+
+TYPE_MAP = {
+    "int": int,
+    "float": float,
+    "str": str,
+    "boolean": bool,
+}
+
+def assign_type(vartype,val):
+    type = TYPE_MAP[vartype]
+    if type is None: raise TypeError(f"Unknown type: {vartype}")
+    return type(val)
+
+class VariableAssignment(Statement):
+    def __init__(self,immutable,type,name,value):
+        self.immutable = immutable == "let"
+        self.type = type
+        self.name = name
+        self.value = value
+
+    def execute(self, env):
+        evaluated = self.value.evaluate(env)
+        typed_value = assign_type(self.type, evaluated)
+        env.set(self.type,self.immutable, self.name, typed_value)
+
+class OutputValue(Statement):
+    def __init__(self,value):
+        self.value = value
+
+    def execute(self, env):
+        print(self.value.evaluate(env))

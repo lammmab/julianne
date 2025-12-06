@@ -3,15 +3,16 @@ from lark import Lark
 def get_file_contents(filepath):
     try:
         with open(filepath, 'r') as file:
-            content = file.read()
-    except FileNotFoundError:
-        print(f"Error: The file at {filepath} was not found.")
+            return file.read()
+    except FileNotFoundError as e:
+        raise FileNotFoundError(f"File not found: {e}")
     except IOError as e:
-        print(f"Error: An I/O error occurred: {e}")
-    
+        raise IOError(f"IOError: {e}")
 
-parser = Lark(get_file_contents("grammar.lark"),parser="lalr",transformer=None)
-def parse(filepath):
-    content = get_file_contents(filepath)
-    if content:
-        return parser.parse(content)
+class Parser():
+    def __init__(self,transformer,path="grammar.lark"):
+        self.path = path
+        self.parser = Lark(get_file_contents(self.path),parser="lalr",transformer=transformer)
+
+    def parse(self,filepath):
+        return self.parser.parse(get_file_contents(filepath))
