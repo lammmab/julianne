@@ -1,0 +1,21 @@
+{
+  "scopeName": "source.julianne",
+  "patterns": [
+    { "name": "comment.line.exclaim.julianne", "match": "!.*$" },
+    { "name": "comment.block.julianne", "begin": ";\\[", "end": "\\];" },
+    
+    { "name": "string.quoted.double.julianne", "begin": "\"", "end": "\"" },
+    { "name": "string.quoted.multiline.julianne", "begin": "\\[\\[", "end": "\\]\\]" },
+
+    { "name": "keyword.control.julianne", "match": "\\b(class|func|var|let|if|else|end|not|return|error)\\b" },
+    { "name": "storage.type.julianne", "match": "\\b(int|str|null|person|Person)\\b" },
+    
+    { "name": "constant.language.boolean.julianne", "match": "\\b(true|false)\\b" },
+
+    { "name": "variable.other.julianne", "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b" },
+
+    { "name": "keyword.operator.julianne", "match": "::|\\+|\\-|\\.|=|\\||:" },
+    
+    { "name": "punctuation.terminator.julianne", "match": "\\!" }
+  ]
+}

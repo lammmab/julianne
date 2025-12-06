@@ -1,0 +1,24 @@
+{
+  "name": "julianne-lang",
+  "displayName": "Julianne Language",
+  "publisher": "lammmab",
+  "engines": { "vscode": "^1.50.0" },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "julianne",
+        "aliases": ["Julianne", "julianne"],
+        "extensions": [".jj"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "julianne",
+        "scopeName": "source.julianne",
+        "path": "./syntaxes/julianne.tmLanguage.json"
+      }
+    ]
+  }
+}
