@@ -17,8 +17,8 @@ let julianne_parser = peg("program", d: Dict):
   NL <- "\n" | "\r\n"
   EOF <- !1
   
-  nested_block <- WS * "{" * *NL * WS * statements * WS * *NL * "}"
-  if_statement <- WS * "if" * WS * "(" * WS * logical * WS * ")" * WS * nested_block
+  nested_block <- WS * "{" * *NL * WS * statements * WS * *NL * "}" | E"Improper nested block"
+  if_statement <- WS * "if" * WS * "(" * WS * statement * WS * ")" * WS * nested_block | E"Improper if"
 
   exp      <- term * *(WS * >('+' | '-') * WS * term) | E"Expected an expression"
   term     <- factor * *(WS * >('*' | '/') * WS * factor) | E"Expected a term"
