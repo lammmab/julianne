@@ -4,23 +4,29 @@ type Dict = Table[string, int]
 
 
 let julianne_parser = peg("program", d: Dict):
-  program <- WS * (statement * *(WS * sep * *NL * WS * statement)) * WS
+  program <- SKIP * (statement * *(statement_sep * statement))
   statement <- varDecl | var_assign | exp | E"Expected a statement"
 
+  ONE_LINE_COMMENT <- '#' * (!NL * 1) * NL
+  MULTI_LINE_COMMENT <- ";[" * (!"];" * 1) * "];"
+  SKIP <- *(' ' | ONE_LINE_COMMENT | MULTI_LINE_COMMENT)
+  statement_sep <- SKIP * sep * SKIP * *NL 
   sep <- NL | ';'
   NL <- "\n" | "\r\n"
+
+  
   exp      <- term * *(WS * >('+' | '-') * WS * term) | E"Expected an expression"
   term     <- factor * *(WS * >('*' | '/') * WS * factor) | E"Expected a term"
-  factor   <- WS * ident | '(' * WS * exp * WS * ')' | E"Expected number or '('"
-  ident <- floating | integer | var_ident | E"Expected identifier"
+  factor   <- '(' * WS * exp * WS * ')' | WS * ident | E"Expected number or '('"
+  ident <- >floating | >integer | >var_ident | E"Expected identifier"
   integer    <- "0" | (nonZeroDigit * *Digit) 
   floating  <- integer * "." * +Digit
   nonZeroDigit <- {'1'..'9'}
 
-  boolean <- >("true" | "false")
-  kw <- >("let" | "var")
-  varDecl <- (kw * WS * var_ident * WS * "=" * WS * >exp)
-  var_ident <- >(+({'a'..'z', '_'}) * *({'a'..'z','A'..'Z','0'..'9','_'}))
+  boolean <- ("true" | "false")
+  kw <- ("let" | "var")
+  varDecl <- (>kw * WS * >var_ident * WS * "=" * WS * exp)
+  var_ident <- (+({'a'..'z', '_'}) * *({'a'..'z','A'..'Z','0'..'9','_'}))
   var_assign <- var_ident * WS * "=" * WS * exp
   WS <- *{' ', '\t'}
 
