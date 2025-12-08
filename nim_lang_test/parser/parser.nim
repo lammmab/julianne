@@ -4,16 +4,18 @@ type Dict = Table[string, int]
 
 
 let julianne_parser = peg("program", d: Dict):
-  program <- SKIP * (statement * *(statement_sep * statement))
+  program <- WS * statements * WS
+  statements <- line * *(statement_sep * *NL * line )
+  line <- EOF | MULTI_LINE_COMMENT | ONE_LINE_COMMENT | statement
   statement <- varDecl | var_assign | exp | E"Expected a statement"
 
-  ONE_LINE_COMMENT <- '#' * (!NL * 1) * NL
-  MULTI_LINE_COMMENT <- ";[" * (!"];" * 1) * "];"
+  ONE_LINE_COMMENT <- '#' * *(!NL * 1)
+  MULTI_LINE_COMMENT <- ";[" * *(!"];" * 1) * "];"
   SKIP <- *(' ' | ONE_LINE_COMMENT | MULTI_LINE_COMMENT)
-  statement_sep <- SKIP * sep * SKIP * *NL 
+  statement_sep <- SKIP * sep * SKIP
   sep <- NL | ';'
   NL <- "\n" | "\r\n"
-
+  EOF <- !1
   
   exp      <- term * *(WS * >('+' | '-') * WS * term) | E"Expected an expression"
   term     <- factor * *(WS * >('*' | '/') * WS * factor) | E"Expected a term"
