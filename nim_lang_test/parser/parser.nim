@@ -7,7 +7,7 @@ let julianne_parser = peg("program", d: Dict):
   program <- WS * statements * WS
   statements <- line * *(statement_sep * *NL * line )
   line <- EOF | MULTI_LINE_COMMENT | ONE_LINE_COMMENT | statement
-  statement <- varDecl | var_assign | exp | E"Expected a statement"
+  statement <- if_statement | varDecl | var_assign | logical | exp | E"Expected a statement"
 
   ONE_LINE_COMMENT <- '#' * *(!NL * 1)
   MULTI_LINE_COMMENT <- ";[" * *(!"];" * 1) * "];"
@@ -17,19 +17,25 @@ let julianne_parser = peg("program", d: Dict):
   NL <- "\n" | "\r\n"
   EOF <- !1
   
+  nested_block <- WS * "{" * *NL * WS * statements * WS * *NL * "}"
+  if_statement <- WS * "if" * WS * "(" * WS * logical * WS * ")" * WS * nested_block
+
   exp      <- term * *(WS * >('+' | '-') * WS * term) | E"Expected an expression"
   term     <- factor * *(WS * >('*' | '/') * WS * factor) | E"Expected a term"
-  factor   <- '(' * WS * exp * WS * ')' | WS * ident | E"Expected number or '('"
+  factor   <- '(' * WS * logical * WS * ')' | WS * ident | >boolean | E"Expected number, boolean, or '('"
   ident <- >floating | >integer | >var_ident | E"Expected identifier"
-  integer    <- "0" | (nonZeroDigit * *Digit) 
+  
+  comparison <- exp * *(WS * >("==" | "~=" | "<" | ">" | "<=" | ">=") * WS * exp)
+  logical    <- comparison * *(WS * >("&&" | "||") * WS * comparison)
+  integer    <- "0" | (nonZeroDigit * *Digit)  
   floating  <- integer * "." * +Digit
   nonZeroDigit <- {'1'..'9'}
 
   boolean <- ("true" | "false")
   kw <- ("let" | "var")
-  varDecl <- (>kw * WS * >var_ident * WS * "=" * WS * exp)
+  varDecl <- (>kw * WS * >var_ident * WS * "=" * WS * logical)
   var_ident <- (+({'a'..'z', '_'}) * *({'a'..'z','A'..'Z','0'..'9','_'}))
-  var_assign <- var_ident * WS * "=" * WS * exp
+  var_assign <- >var_ident * WS * "=" * WS * logical
   WS <- *{' ', '\t'}
 
 proc parse(cnt: string) = 
