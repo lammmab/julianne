@@ -1,0 +1,6 @@
+[submodule "bind"]
+	path = bind
+	url = https://github.com/karl-zylinski/odin-c-bindgen
+[submodule "packcc"]
+	path = packcc
+	url = https://github.com/arithy/packcc
