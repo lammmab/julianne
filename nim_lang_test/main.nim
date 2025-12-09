@@ -7,8 +7,6 @@ proc extract_file_contents(filename: string): string =
   defer: inputFile.close()
   return inputFile.readAll()
 
-
-
 proc main() =
   var p = newParser:  
     arg("filename", help="File to interpret")

@@ -1,4 +1,5 @@
 import npeg, strutils, tables
+import ../ast/ast
 
 type Dict = Table[string, int]
 
@@ -6,8 +7,8 @@ type Dict = Table[string, int]
 let julianne_parser = peg("program", d: Dict):
   program <- >(WS * statements * WS)
   statements <- line * *(line_sep * line)
-  line <- EOF | MULTI_LINE_COMMENT | ONE_LINE_COMMENT | statement
-  statement <- function_call | var_declare | const_declare | return_stmt | keyword | while_loop | function_declare | var_assign | primary | E"Expected a statement"
+  line <- EOF | ONE_LINE_COMMENT | MULTI_LINE_COMMENT | statement
+  statement <- var_declare | const_declare | return_stmt | keyword | while_loop | function_declare | var_assign | primary_expr | E"Expected a statement"
 
   ONE_LINE_COMMENT <- '#' * *(!NL * 1)
   MULTI_LINE_COMMENT <- ";[" * *(!"];" * 1) * "];"
@@ -16,6 +17,7 @@ let julianne_parser = peg("program", d: Dict):
   sep <- SKIP * (NL | ';') * SKIP
   NL <- "\n" | "\r\n"
   EOF <- !1
+  EMPTY_LINE <- WS * SKIP * WS
 
   obj_ident <- WS * "::" * WS * obj_name
   obj_name <- +{'A'..'Z'} * +({'A'..'Z'} | {'a'..'z'})
@@ -26,7 +28,11 @@ let julianne_parser = peg("program", d: Dict):
   arr <- "[" * WS * ?(primary_expr * *(WS * "," * WS * primary_expr)) * WS * "]"
 
   while_loop <- WS * "while" * ?parentheses_expr * nested_block
-  postfix <- primary * *(WS * "." * WS * var_ident)
+  postfix <- primary * *(call_op | member_op | index_op)
+
+  member_op <- WS * "." * WS * var_ident
+  index_op <- WS * "[" * WS * primary_expr * WS * "]" * WS
+  call_op <- parentheses_args
 
   if_template <- * parentheses_expr * nested_block
   if_statement <- WS * "if" * if_template * elseif_statement * ?(else_clause)
@@ -35,21 +41,20 @@ let julianne_parser = peg("program", d: Dict):
   keyword <- WS * ("continue" | "break") * WS
 
   return_stmt <- WS * "return" * WS * ?(primary_expr) * WS
-  const_declare <- WS * "const" * WS * const_name * WS * "=" * primary_expr 
-  const_name <- +{'A'..'Z'} * +({'A'..'Z'})
+  const_declare <- WS * "const" * WS * const_name * WS * "=" * WS * primary_expr_err 
+  const_name <- +{'A'..'Z'} * *({'A'..'Z'})
 
-  function_declare <- WS * "fn" * WS * var_ident * parentheses_params * nested_block | E"Malformed function statement"
-  function_call <- WS * var_ident * parentheses_args * WS
+  function_declare <- WS * "fn" * WS * var_ident * parentheses_params * nested_block
   parentheses_args <- open_paren * args * close_paren
   args <- ?(WS * primary_expr * WS * *(',' * WS * primary_expr * WS))
 
-  primary <- function_call | parentheses_expr | arr | literal | boolean | var_ident
-  product <- primary
-  sum <- product * (*(WS * ("*" | "/") * WS * product)) ^ 4
-  comparison <- sum * (*(WS * ("+" | "-") * WS * sum)) ^ 3
-  factor <- comparison * (*(WS * ("==" | "~=" | "<" | ">" | "<=" | ">=") * WS * comparison)) ^ 2
-  term <- factor * (*(WS * "&&" * WS * factor)) ^ 1
-  primary_expr <- term * (*(WS * "||" * WS * term)) ^ 0
+  primary <- parentheses_expr | arr | literal | boolean | var_ident
+  product <- postfix
+  sum <- product * (*(WS * ("*" | "/") * WS * product))
+  comparison <- sum * (*(WS * ("+" | "-") * WS * sum))
+  factor <- comparison * (*(WS * ("==" | "~=" | "<" | ">" | "<=" | ">=") * WS * comparison))
+  term <- factor * (*(WS * "&&" * WS * factor))
+  primary_expr <- term * (*(WS * "||" * WS * term))
   primary_expr_err <- primary_expr | E"Expected primary expression"
   parentheses_expr <- open_paren * primary_expr * close_paren
   open_paren <- WS * "(" * WS
@@ -65,15 +70,18 @@ let julianne_parser = peg("program", d: Dict):
   formatted_str <- "f" * '"' * (*( escape | interpolation | (!'"' * 1) )) * '"'
   interpolation <- '{' * primary_expr_err * '}'
 
-  integer    <- "0" | (non_zero_digit * *Digit)
-  floating   <- (integer * "." * +Digit)
+  integer    <- >("0" | (non_zero_digit * *Digit)):
+    let i = $1;
+    let lit = newLit(i);
+    echo lit.i_v;
+  floating   <- (integer * "." * integer)
   non_zero_digit <- {'1'..'9'}
   boolean    <- ("true" | "false")
 
   kw <- ("let" | "var")
   var_declare <- (kw * WS * var_ident * WS * "=" * WS * primary_expr_err)
   var_ident <- (+({'a'..'z', '_'}) * *({'a'..'z','A'..'Z','0'..'9','_'}))
-  var_assign <- var_ident * WS * "=" * WS * primary_expr_err
+  var_assign <- postfix * WS * "=" * WS * primary_expr_err
 
   params <- ?(WS * var_ident * WS * *(WS * ',' * WS * var_ident * WS))
   parentheses_params <- open_paren * params * close_paren
