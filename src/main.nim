@@ -14,7 +14,11 @@ proc main() =
     run:
       let filename = opts.filename
       echo "Processing file: ", filename
-      parse(extract_file_contents(filename))
+      try:
+        let contents = parse(extract_file_contents(filename))
+      except:
+        quit(1)
+
 
   try:
     p.run()
