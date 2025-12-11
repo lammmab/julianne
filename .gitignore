@@ -23,5 +23,5 @@ target
 .env
 .vscode
 *.exe
-build
+dist
     

@@ -1,297 +1,290 @@
+import union/union
+import std/tables
+import tokenizer
 import strutils
+type None = object
 
 type
-  LiteralType* = enum
-    nkFloat, nkInteger, nkString, nkArr, nkBool
+  NodeKind* = enum 
+    nk_root_node, 
+    nk_literal, 
+    nk_identifier, 
+    nk_operation,
+    nk_var_decl
+    
+  LiteralType* = enum 
+    lt_str,
+    lt_formatted_str,
+    lt_float,
+    lt_int,
+    lt_arr,
 
-  AstNodeType* = enum
-    nkLiteral, nkBinOp, nkIdentifier, nkFunctionCall
+  ArrayLiteral* = object
+    elements*: seq[ref ASTNode]
 
-  AstNode* = ref object of RootObj
-    kind*: AstNodeType
-    line*, col*: int
-    parent*: AstNode
+  VariableDeclaration* = object
+    identifier: string
+    initializer: ref ASTNode
 
-  LiteralNode* = ref object of AstNode
-    case literal_type*: LiteralType
-    of nkInteger:
-      i_v*: int
-    of nkFloat:
-      f_v*: float
-    of nkString:
-      s_v*: string
-    of nkArr:
-      a_v*: seq[AstNode]
-    of nkBool:
-      b_v*: bool
+  LiteralValue* = object
+    case kind: LiteralType
+    of lt_str: str_val: string
+    of lt_formatted_str: formatted_str_val: seq[ref ASTNode]
+    of lt_float: float_val: float
+    of lt_arr: arr_val: ArrayLiteral
+    of lt_int: int_val: int
 
-  IdentifierNode* = ref object of AstNode
-    name*: string
+  Operation* = object
+    op: string
+    left: ref ASTNode
+    right: ref ASTNode
 
-type
-  ExprKind* = enum
-    ekLiteral, ekIdentifier, ekBinaryOp, ekUnaryOp, ekFunctionCall, ekArrayAccess, ekMemberAccess
+  ASTNode* = object
+    parent*: ref ASTNode
+    children*: seq[ref ASTNode]
+    case kind: NodeKind
+    of nk_root_node: discard
+    of nk_literal: literal: LiteralValue
+    of nk_identifier: identifier_name: string
+    of nk_operation: operation: Operation
+    of nk_var_decl: decl: VariableDeclaration
 
-  ExprNode* = ref object of AstNode
-    case kindEx*: ExprKind
-    of ekLiteral:
-      lit*: LiteralNode
-    of ekIdentifier:
-      id*: IdentifierNode
-    of ekBinaryOp:
-      left*, right*: ExprNode
-      bin_op*: string
-    of ekUnaryOp:
-      expression*: ExprNode
-      unary_op*: string
-    of ekFunctionCall:
-      callee*: ExprNode
-      args*: seq[ExprNode]
-    of ekArrayAccess:
-      arr*, index*: ExprNode
-    of ekMemberAccess:
-      base*: ExprNode
-      property*: string
-
-type
-  StmtKind* = enum
-    skVarDecl, skConstDecl, skAssign, skReturn,
-    skIf, skWhile, skExprStmt, skFunctionDecl, skBlock
-
-  StmtNode* = ref object of AstNode
-    case kindStmt*: StmtKind
-    of skVarDecl, skConstDecl:
-      declared_name*: string
-      declared_value*: ExprNode
-    of skAssign:
-      target*: ExprNode
-      assigned_value*: ExprNode
-    of skReturn:
-      returned_value*: ExprNode
-    of skIf:
-      if_cond*: ExprNode
-      thenBlock*: StmtNode
-      elseBlock*: StmtNode
-    of skWhile:
-      while_cond*: ExprNode
-      while_body*: StmtNode
-    of skExprStmt:
-      expres*: ExprNode
-    of skFunctionDecl:
-      func_declared_name*: string
-      params*: seq[string]
-      func_body*: StmtNode
-    of skBlock:
-      stmts*: seq[StmtNode]
-
-type
-  ParseContext* = object
-    astStack*: seq[AstNode]
-
-var ctx*: ParseContext
-
-proc push_node*(n: AstNode) =
-  ctx.astStack.add(n)
-
-proc pop_node*(): AstNode =
-  echo "Node being captured"
-  result = ctx.astStack[^1]
-  ctx.astStack.del(ctx.astStack.high)
-
-# === Literal constructors ===
-proc new_bool_literal*(value: bool): LiteralNode =
-  LiteralNode(kind: nkLiteral, literal_type: nkBool, b_v: value)
-
-proc new_int_literal*(value: int): LiteralNode =
-  LiteralNode(kind: nkLiteral, literal_type: nkInteger, i_v: value)
-
-proc new_float_literal*(value: float): LiteralNode =
-  LiteralNode(kind: nkLiteral, literal_type: nkFloat, f_v: value)
-
-proc new_str_literal*(value: string): LiteralNode =
-  LiteralNode(kind: nkLiteral, literal_type: nkString, s_v: value)
-
-proc new_arr_literal*(value: seq[AstNode]): LiteralNode =
-  LiteralNode(kind: nkLiteral, literal_type: nkArr, a_v: value)
-
-# === Expr constructors ===
-proc new_literal_expr*(lit: LiteralNode): ExprNode =
-  ExprNode(kindEx: ekLiteral, lit: lit)
-
-proc new_bool_expr*(value: bool): ExprNode =
-  new_literal_expr(new_bool_literal(value))
-
-proc new_int_expr*(value: int): ExprNode =
-  new_literal_expr(new_int_literal(value))
-
-proc new_float_expr*(value: float): ExprNode =
-  new_literal_expr(new_float_literal(value))
-
-proc new_str_expr*(value: string): ExprNode =
-  new_literal_expr(new_str_literal(value))
-
-proc new_arr_expr*(value: seq[AstNode]): ExprNode =
-  new_literal_expr(new_arr_literal(value))
-
-proc new_identifier_expr*(name: string): ExprNode =
-  ExprNode(kindEx: ekIdentifier, id: IdentifierNode(kind: nkIdentifier, name: name))
-
-proc new_binary_expr*(left: ExprNode, op: string, right: ExprNode): ExprNode =
-  ExprNode(kindEx: ekBinaryOp, left: left, bin_op: op, right: right)
-
-proc new_unary_expr*(expr: ExprNode, op: string): ExprNode =
-  ExprNode(kindEx: ekUnaryOp, expression: expr, unary_op: op)
-
-proc new_function_call_expr*(callee: ExprNode, args: seq[ExprNode]): ExprNode =
-  ExprNode(kindEx: ekFunctionCall, callee: callee, args: args)
-
-proc new_array_access_expr*(arr, index: ExprNode): ExprNode =
-  ExprNode(kindEx: ekArrayAccess, arr: arr, index: index)
-
-# === Stmt constructors ===
-proc new_var_decl*(name: string, value: ExprNode): StmtNode =
-  StmtNode(kindStmt: skVarDecl, declared_name: name, declared_value: value)
-
-proc new_const_decl*(name: string, value: ExprNode): StmtNode =
-  StmtNode(kindStmt: skConstDecl, declared_name: name, declared_value: value)
-
-proc new_assign*(target: ExprNode, value: ExprNode): StmtNode =
-  StmtNode(kindStmt: skAssign, target: target, assigned_value: value)
-
-proc new_return*(value: ExprNode): StmtNode =
-  StmtNode(kindStmt: skReturn, returned_value: value)
-
-proc new_expr_stmt*(expr: ExprNode): StmtNode =
-  StmtNode(kindStmt: skExprStmt, expres: expr)
-
-proc new_if_stmt*(cond: ExprNode, thenBlock, elseBlock: StmtNode): StmtNode =
-  StmtNode(kindStmt: skIf, if_cond: cond, thenBlock: thenBlock, elseBlock: elseBlock)
-
-proc new_while_stmt*(cond: ExprNode, body: StmtNode): StmtNode =
-  StmtNode(kindStmt: skWhile, while_cond: cond, while_body: body)
-
-proc new_block*(stmts: seq[StmtNode]): StmtNode =
-  StmtNode(kindStmt: skBlock, stmts: stmts)
-
-proc new_function_decl*(name: string, params: seq[string], body: StmtNode): StmtNode =
-  StmtNode(kindStmt: skFunctionDecl, func_declared_name: name, params: params, func_body: body)
-
-proc new_member_access_expr*(base: ExprNode, property: string): ExprNode =
-  ExprNode(kindEx: ekMemberAccess, base: base, property: property)
-
-# === Push helpers ===
-proc push_bool_expr*(value: bool) = push_node(new_bool_expr(value))
-proc push_int_expr*(value: int) = push_node(new_int_expr(value))
-proc push_float_expr*(value: float) = push_node(new_float_expr(value))
-proc push_str_expr*(value: string) = push_node(new_str_expr(value))
-proc push_arr_expr*(value: seq[AstNode]) = push_node(new_arr_expr(value))
-proc push_identifier_expr*(name: string) = push_node(new_identifier_expr(name))
-proc push_binary_expr*(left: ExprNode, op: string, right: ExprNode) = push_node(new_binary_expr(left, op, right))
-proc push_unary_expr*(expr: ExprNode, op: string) = push_node(new_unary_expr(expr, op))
-proc push_function_call_expr*(callee: ExprNode, args: seq[ExprNode]) = push_node(new_function_call_expr(callee, args))
-proc push_array_access_expr*(arr, index: ExprNode) = push_node(new_array_access_expr(arr, index))
-proc push_var_decl*(name: string, value: ExprNode) = push_node(new_var_decl(name, value))
-proc push_const_decl*(name: string, value: ExprNode) = push_node(new_const_decl(name, value))
-proc push_assign*(target, value: ExprNode) = push_node(new_assign(target, value))
-proc push_return*(value: ExprNode) = push_node(new_return(value))
-proc push_expr_stmt*(expr: ExprNode) = push_node(new_expr_stmt(expr))
-proc push_if_stmt*(cond: ExprNode, thenBlock, elseBlock: StmtNode) = push_node(new_if_stmt(cond, thenBlock, elseBlock))
-proc push_while_stmt*(cond: ExprNode, body: StmtNode) = push_node(new_while_stmt(cond, body))
-proc push_block*(stmts: seq[StmtNode]) = push_node(new_block(stmts))
-proc push_function_decl*(name: string, params: seq[string], body: StmtNode) = push_node(new_function_decl(name, params, body))
-
-proc dump_node*(node: AstNode, indent: int = 0) =
-  if node == nil:
-    echo repeat(" ", indent) & "<nil>"
-    return
-  let pad = repeat(" ", indent)
-
-  if node of ExprNode:
-    let e = ExprNode(node)
-    case e.kindEx
-    of ekLiteral:
-      let lit = e.lit
-      case lit.literal_type
-      of nkInteger: echo pad & "Literal[int]: ", lit.i_v
-      of nkFloat:   echo pad & "Literal[float]: ", lit.f_v
-      of nkString:  echo pad & "Literal[string]: \"", lit.s_v, "\""
-      of nkBool:    echo pad & "Literal[bool]: ", lit.b_v
-      of nkArr:
-        echo pad & "Literal[array]: ["
-        for child in lit.a_v:
-          dump_node(child, indent + 2)
-        echo pad & "]"
-    of ekIdentifier:
-      echo pad & "Identifier: ", e.id.name
-    of ekBinaryOp:
-      echo pad & "BinaryOp: ", e.bin_op
-      dump_node(e.left, indent + 2)
-      dump_node(e.right, indent + 2)
-    of ekUnaryOp:
-      echo pad & "UnaryOp: ", e.unary_op
-      dump_node(e.expression, indent + 2)
-    of ekFunctionCall:
-      echo pad & "FunctionCall:"
-      dump_node(e.callee, indent + 2)
-      echo pad & "Args:"
-      for arg in e.args:
-        dump_node(arg, indent + 4)
-    of ekArrayAccess:
-      echo pad & "ArrayAccess:"
-      echo pad & "Array:"
-      dump_node(e.arr, indent + 2)
-      echo pad & "Index:"
-      dump_node(e.index, indent + 2)
-  elif node of StmtNode:
-    let s = StmtNode(node)
-    case s.kindStmt
-    of skVarDecl:
-      echo pad & "VarDecl: ", s.declared_name
-      dump_node(s.declared_value, indent + 2)
-    of skConstDecl:
-      echo pad & "ConstDecl: ", s.declared_name
-      dump_node(s.declared_value, indent + 2)
-    of skAssign:
-      echo pad & "Assign:"
-      dump_node(s.target, indent + 2)
-      dump_node(s.assigned_value, indent + 2)
-    of skReturn:
-      echo pad & "Return:"
-      dump_node(s.returned_value, indent + 2)
-    of skIf:
-      echo pad & "IfStmt:"
-      echo pad & "Condition:"
-      dump_node(s.if_cond, indent + 2)
-      echo pad & "Then:"
-      dump_node(s.thenBlock, indent + 2)
-      if s.elseBlock != nil:
-        echo pad & "Else:"
-        dump_node(s.elseBlock, indent + 2)
-    of skWhile:
-      echo pad & "WhileStmt:"
-      echo pad & "Condition:"
-      dump_node(s.while_cond, indent + 2)
-      echo pad & "Body:"
-      dump_node(s.while_body, indent + 2)
-    of skExprStmt:
-      echo pad & "ExprStmt:"
-      dump_node(s.expres, indent + 2)
-    of skFunctionDecl:
-      echo pad & "FunctionDecl: ", s.func_declared_name
-      echo pad & "Params: ", s.params
-      echo pad & "Body:"
-      dump_node(s.func_body, indent + 2)
-    of skBlock:
-      echo pad & "Block:"
-      for stmt in s.stmts:
-        dump_node(stmt, indent + 2)
-  elif node of LiteralNode:
-    echo pad & "LiteralNode (unexpected raw node)"
+proc new_var(name: string, initializer: ref ASTNode, p: ref ASTNode): ref ASTNode =
+  let variable = new ASTNode
+  variable.parent = p
+  variable.kind = nk_var_decl
+  variable.decl = VariableDeclaration(identifier: name, initializer: initializer)
+  if initializer != nil:
+    variable.children = @[initializer]
+    initializer.parent = variable
   else:
-    echo pad & "Unknown node type"
+    variable.children = @[]
+  variable
 
-proc dump_ast_stack*() =
-  echo "AST Stack:"
-  for i, n in ctx.astStack:
-    echo "  [", i, "]"
-    dump_node(n, 4)
+proc new_ident(name: string,p: ref ASTNode): ref ASTNode =
+  let ident = new ASTNode
+  ident.parent = p
+  ident.kind = nk_identifier
+  ident.identifier_name = name
+  ident
+
+proc new_lit[T](v: T, p: ref ASTNode): ref ASTNode =
+  let val: LiteralValue = 
+    when T is int: LiteralValue(kind: lt_int, int_val: v)
+    elif T is float: LiteralValue(kind: lt_float, float_val: v)
+    elif T is string: LiteralValue(kind: lt_str, str_val: v)
+    elif T is seq[ref ASTNode]: LiteralValue(kind: lt_formatted_str, formatted_str_val: v)
+    elif T is ArrayLiteral: LiteralValue(kind: lt_arr, arr_val: v)
+    else: static: doAssert false, "Unsupported literal type"
+
+  let litNode = new ASTNode
+  litNode.parent = p
+  litNode.kind = nk_literal
+  litNode.literal = val
+  return litNode
+
+proc printAST*(node: ref ASTNode, prefix: string = "", isLast: bool = true) =
+  let branch = if prefix.len > 0:
+                 if isLast: "└─ " else: "├─ "
+               else: ""
+  let newPrefix = prefix & (if isLast: "   " else: "│  ")
+
+  var label = ""
+  case node.kind
+  of nk_root_node:
+    label = "(ROOT)"
+  of nk_literal:
+    case node.literal.kind
+    of lt_int: label = "Literal(int: " & $node.literal.int_val & ")"
+    of lt_float: label = "Literal(float: " & $node.literal.float_val & ")"
+    of lt_str: label = "Literal(str: '" & node.literal.str_val & "')"
+    of lt_formatted_str: label = "Literal(formatted_str)"
+    of lt_arr: label = "Literal(array)"
+  of nk_identifier:
+    label = "Ident(" & node.identifier_name & ")"
+  of nk_operation:
+    label = "Op(" & node.operation.op & ")"
+  of nk_var_decl:
+    label = "VariableDeclaration(" & node.decl.identifier & ")"
+  echo prefix & branch & label
+
+  for i, child in node.children:
+    printAST(child, newPrefix, i == node.children.len - 1)
+
+  if node.kind == nk_operation:
+    if node.operation.left != nil:
+      printAST(node.operation.left, newPrefix, node.operation.right == nil)
+    if node.operation.right != nil:
+      printAST(node.operation.right, newPrefix, true)
+  
+proc new_unary_operation(op: string, left: ref ASTNode, p: ref ASTNode): ref ASTNode =
+  let un = new ASTNode
+  un.parent = p
+  un.kind = nk_operation
+  un.operation = Operation(op: op, left: left)
+  un
+
+proc new_binary_operation(op: string, left: ref ASTNode, right: ref ASTNode, p: ref ASTNode): ref ASTNode =
+  let bin = new ASTNode
+  bin.parent = p
+  bin.kind = nk_operation
+  bin.operation = Operation(op: op, left: left, right: right)
+  bin
+
+let operator_precedence_seq: seq[tuple[id: string, number: int]] = @[
+  ("^", 12), ("~", 11), ("*", 10), ("/", 10), ("%", 10),
+  ("+", 9), ("-", 9), ("<", 7), (">", 7), ("<=", 7),
+  (">=", 7), ("~=", 7), ("==", 7), ("&", 6), ("|", 5)
+]
+
+proc get_precedence(op: string): int =
+  for o, p in operator_precedence_seq:
+    if p.id == op: return p.number
+  return 1
+
+type
+  TransformerContext = object
+    idx: int
+    tokens: seq[JulianneToken]
+
+func current_token(c: TransformerContext): JulianneToken =
+  return c.tokens[c.idx]
+
+proc match_kind(ctx: var TransformerContext, kind: TokenKind): bool = 
+  if ctx.idx < ctx.tokens.len and ctx.tokens[ctx.idx].kind == kind: 
+    ctx.idx += 1 
+    return true 
+  else: 
+    return false
+
+proc match_kind_err(ctx: var TransformerContext, kind: TokenKind, err: string) =
+  if not match_kind(ctx,kind):
+    raise newException(ValueError, err)
+
+proc parse_primary*(ctx: var TransformerContext, expect_unary: bool): ref ASTNode
+proc parse_expression*(
+  ctx: var TransformerContext,
+  min_prec: int,
+  expect_unary: bool
+): ref ASTNode
+proc parse_statement(ctx: var TransformerContext): ref ASTNode
+
+proc parse_inline_block(
+    ctx: var TransformerContext,
+    p: ref ASTNode
+): ref ASTNode =
+  match_kind_err(ctx,tk_bracket_open,"Missing '{' for nested block")
+  while ctx.idx < ctx.tokens.len and ctx.current_token().kind != tk_bracket_close:
+    let statement = parse_statement(ctx)
+    statement.parent = p
+    p.children.add(statement)
+  match_kind_err(ctx,tk_bracket_close, "Missing '}' for inline block")
+
+proc parse_primary*(ctx: var TransformerContext, expect_unary: bool): ref ASTNode =
+  if ctx.idx >= ctx.tokens.len:
+    raise newException(ValueError, "Unexpected end of input")
+
+  let tok = ctx.current_token()
+
+  case tok.kind
+  of tk_int_literal:
+    ctx.idx += 1
+    return new_lit(parseInt(tok.text), nil)
+  of tk_var_identifier, tk_const_identifier:
+    ctx.idx += 1
+    return new_ident(tok.text, nil)
+  of tk_operator:
+    if expect_unary:
+      ctx.idx += 1
+      let operand = parse_primary(ctx,true)
+      return new_unary_operation(tok.text, operand, nil)
+    else:
+        raise newException(ValueError, "Unexpected operator: " & tok.text)
+  of tk_paren_open:
+    ctx.idx += 1
+    let expression = parse_expression(ctx,0,true)
+    match_kind_err(ctx,tk_paren_close,"Expected closing ')'")
+    return expression
+  of tk_bracket_open:
+    ctx.idx += 1
+    var elements: seq[ref ASTNode] = @[]
+    while ctx.idx < ctx.tokens.len and ctx.current_token().kind != tk_bracket_close:
+      elements.add(parse_expression(ctx,0,true))
+      if ctx.current_token().kind == tk_comma:
+        ctx.idx += 1
+    match_kind_err(ctx,tk_bracket_close,"Expected closing ']' for array")
+    return new_lit(ArrayLiteral(elements: elements), nil)
+  of tk_string_normal,tk_string_raw,tk_string_formatted:
+    ctx.idx += 1
+    return new_lit(tok.text,nil)
+  else:
+    raise newException(ValueError, "Unexpected token: " & tok.text)
+
+proc parse_expression*(
+  ctx: var TransformerContext,
+  min_prec: int,
+  expect_unary: bool
+): ref ASTNode =
+  var left = parse_primary(ctx, expect_unary)
+  var allow_unary = false
+  while ctx.idx < ctx.tokens.len:
+    let tok = ctx.current_token()
+    if tok.kind != tk_operator or allow_unary:
+      break
+    let prec = get_precedence(tok.text)
+    if prec < min_prec:
+      break
+    ctx.idx += 1
+    let right = parse_expression(ctx, prec + 1, true)
+    left = new_binary_operation(tok.text, left, right, nil)
+    allow_unary = false
+  return left
+
+proc parse_var_decl*(
+    ctx: var TransformerContext
+): ref ASTNode =
+  let var_type = ctx.current_token().text
+  ctx.idx += 1
+  let identifier = ctx.current_token().text
+  ctx.idx += 2 # ignore the equals sign
+  let exp = parse_expression(ctx,0,true)
+  match_kind_err(ctx,tk_seperator,"Missing token seperator ; or \\n")
+  let variable = new_var(identifier,exp,nil)
+  exp.parent = variable
+  variable
+  
+proc parse_keyword(ctx: var TransformerContext): ref ASTNode =
+  case ctx.current_token().text
+  of "let":
+    return parse_var_decl(ctx)
+  of "var":
+    return parse_var_decl(ctx)
+  of "const":
+    return parse_var_decl(ctx)
+  
+
+proc parse_statement(ctx: var TransformerContext): ref ASTNode =
+  let tok = ctx.current_token()
+  case tok.kind
+  of tk_keyword:
+    return parse_keyword(ctx)
+  else:
+    let expression = parse_expression(ctx,0,true)
+    match_kind_err(ctx,tk_seperator,"Missing token seperator ; or \\n")
+    return expression   
+
+proc ast_transformer*(tokens: seq[JulianneToken]): ref ASTNode =
+  var ctx = TransformerContext(
+    idx: 0,
+    tokens: tokens
+  )
+  let root = new ASTNode
+  root.kind = nk_root_node
+  root.children = @[]
+  while ctx.idx < ctx.tokens.len:
+    echo "Parsing ", ctx.current_token().kind
+    let statement = parse_statement(ctx)
+    statement.parent = root
+    root.children.add(statement)
+
+  return root
