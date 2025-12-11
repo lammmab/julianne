@@ -7,6 +7,9 @@ The main AST structure of the program:
   - Methods for pretty-printing an AST
   - Automated error handling
 
+Usage:
+  1. Parse a stream of valid Julianne tokens
+  2. Call ast_transformer(tokens)
 ]#
 
 import union/union
