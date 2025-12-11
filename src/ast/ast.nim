@@ -10,7 +10,9 @@ type
     nk_literal, 
     nk_identifier, 
     nk_operation,
-    nk_var_decl
+    nk_var_decl,
+    nk_if_chain,
+    nk_func_decl
     
   LiteralType* = enum 
     lt_str,
@@ -19,12 +21,35 @@ type
     lt_int,
     lt_arr,
 
+  IfType* = enum 
+    it_if,
+    it_elseif,
+    it_else
+
+  IfDeclaration* = object 
+    if_type: IfType
+    cond: ref ASTNode
+    body: seq[ref ASTNode]
+
+  IfChain* = object
+    branches: seq[IfDeclaration]
+
   ArrayLiteral* = object
     elements*: seq[ref ASTNode]
 
   VariableDeclaration* = object
     identifier: string
     initializer: ref ASTNode
+    
+  Param* = object
+    name: string
+    paramType: ref ASTNode
+    defaultValue: ref ASTNode
+
+  FunctionDeclaration* = object
+    identifier: string
+    params: seq[Param]
+    body: seq[ref ASTNode]
 
   LiteralValue* = object
     case kind: LiteralType
@@ -47,13 +72,51 @@ type
     of nk_literal: literal: LiteralValue
     of nk_identifier: identifier_name: string
     of nk_operation: operation: Operation
-    of nk_var_decl: decl: VariableDeclaration
+    of nk_var_decl: var_decl: VariableDeclaration
+    of nk_if_chain: if_chain: IfChain
+    of nk_func_decl: func_decl: FunctionDeclaration
+
+proc new_func(identifier: string, params: seq[Param], body: seq[ref ASTNode]): ref ASTNode =
+  let fn_node = new ASTNode
+  fn_node.kind = nk_func_decl
+  fn_node.func_decl = FunctionDeclaration(
+    identifier: identifier,
+    params: params,
+    body: body
+  )
+
+  fn_node.children = @[]
+
+  for stmt in body:
+    if stmt != nil:
+      stmt.parent = fn_node
+      fn_node.children.add(stmt)
+
+  return fn_node
+
+proc match_if(text: string): IfType =
+  if text == "if":
+    return it_if
+  elif text == "elseif":
+    return it_elseif
+  elif text == "else":
+    return it_else
+
+proc new_if_branch(statement: ref ASTNode, if_decl: IfDeclaration) =
+  statement.if_chain.branches.add(if_decl)
+
+proc new_if_chain(branch: IfDeclaration): ref ASTNode =
+  let chain = new ASTNode
+  chain.kind = nk_if_chain
+  chain.if_chain = IfChain(branches: @[])
+  chain.if_chain.branches.add(branch)
+  chain
 
 proc new_var(name: string, initializer: ref ASTNode, p: ref ASTNode): ref ASTNode =
   let variable = new ASTNode
   variable.parent = p
   variable.kind = nk_var_decl
-  variable.decl = VariableDeclaration(identifier: name, initializer: initializer)
+  variable.var_decl = VariableDeclaration(identifier: name, initializer: initializer)
   if initializer != nil:
     variable.children = @[initializer]
     initializer.parent = variable
@@ -101,11 +164,58 @@ proc printAST*(node: ref ASTNode, prefix: string = "", isLast: bool = true) =
     of lt_formatted_str: label = "Literal(formatted_str)"
     of lt_arr: label = "Literal(array)"
   of nk_identifier:
-    label = "Ident(" & node.identifier_name & ")"
+    label = "Identifier(" & node.identifier_name & ")"
   of nk_operation:
-    label = "Op(" & node.operation.op & ")"
+    label = "Operator(" & node.operation.op & ")"
   of nk_var_decl:
-    label = "VariableDeclaration(" & node.decl.identifier & ")"
+    label = "VariableDeclaration(" & node.var_decl.identifier & ")"
+  of nk_if_chain:
+    label = "IfChain"
+    echo prefix & branch & label
+
+    for i, br in node.if_chain.branches:
+      let isLastBranch = i == node.if_chain.branches.len - 1
+      let branchPrefix = newPrefix & (if not isLastBranch: "├─ " else: "└─ ")
+
+      let t =
+        case br.if_type
+        of it_if: "if"
+        of it_elseif: "elseif"
+        of it_else: "else"
+
+      echo branchPrefix & t
+
+      if br.if_type != it_else:
+        printAST(br.cond, newPrefix & (if not isLastBranch: "│  " else: "   "), true)
+
+      if br.body.len > 0:
+        echo newPrefix & (if not isLastBranch: "│  " else: "   ") & "Body"
+        for j, stmt in br.body:
+          printAST(stmt, newPrefix & (if not isLastBranch: "│  " else: "   ") & "   ", j == br.body.len - 1)
+    return
+  of nk_func_decl:
+    label = "FunctionDeclaration(" & node.func_decl.identifier & ")"
+    echo prefix & branch & label
+    if node.func_decl.params.len > 0:
+      echo newPrefix & "├─ Params"
+      for i, p in node.func_decl.params:
+        let isLastParam = i == node.func_decl.params.len - 1
+        let pfx = newPrefix & (if not isLastParam: "│  " else: "   ")
+        echo pfx & (if isLastParam: "└─ " else: "├─ ") & "Param(" & p.name & ")"
+        if p.defaultValue != nil:
+          printAST(
+            p.defaultValue,
+            pfx & (if isLastParam: "   " else: "│  "),
+            true
+          )
+    if node.func_decl.body.len > 0:
+      echo newPrefix & "└─ Body"
+      for i, stmt in node.func_decl.body:
+        printAST(stmt, newPrefix & "   ", i == node.func_decl.body.len - 1)
+
+    return
+
+
   echo prefix & branch & label
 
   for i, child in node.children:
@@ -190,6 +300,9 @@ proc parse_primary*(ctx: var TransformerContext, expect_unary: bool): ref ASTNod
   of tk_int_literal:
     ctx.idx += 1
     return new_lit(parseInt(tok.text), nil)
+  of tk_fl_literal:
+    ctx.idx += 1
+    return new_lit(parseFloat(tok.text), nil)
   of tk_var_identifier, tk_const_identifier:
     ctx.idx += 1
     return new_ident(tok.text, nil)
@@ -243,16 +356,100 @@ proc parse_expression*(
 proc parse_var_decl*(
     ctx: var TransformerContext
 ): ref ASTNode =
-  let var_type = ctx.current_token().text
+  let var_type = ctx.current_token().text # start using this var_type for consts vs privs vs immutables later
   ctx.idx += 1
   let identifier = ctx.current_token().text
-  ctx.idx += 2 # ignore the equals sign
+  ctx.idx += 1
+  match_kind_err(ctx,tk_assign,"Missing equals sign for variable declaration")
   let exp = parse_expression(ctx,0,true)
   match_kind_err(ctx,tk_seperator,"Missing token seperator ; or \\n")
   let variable = new_var(identifier,exp,nil)
   exp.parent = variable
   variable
   
+proc parse_if*(
+  ctx: var TransformerContext
+): IfDeclaration =
+  let if_type = match_if(ctx.current_token().text)
+  ctx.idx += 1
+
+  var exp: ref ASTNode
+  if if_type != it_else:
+    match_kind_err(ctx,tk_paren_open,"Missing opening '(' for if statement")
+    exp = parse_expression(ctx,0,true)
+    match_kind_err(ctx,tk_paren_close,"Missing closing ')' for if statement")
+
+  match_kind_err(ctx,tk_brace_open,"Missing opening '{' for if statement")
+  var decl = IfDeclaration(if_type: if_type, cond: exp, body: @[])
+  while ctx.idx < ctx.tokens.len and ctx.current_token().text != "}":
+    let statement = parse_statement(ctx)
+    decl.body.add(statement)
+  match_kind_err(ctx,tk_brace_close,"Missing closing '}' for if statement")
+  decl
+
+proc parse_if_statement*(
+  ctx: var TransformerContext
+): ref ASTNode =
+  var if_decl = parse_if(ctx)
+  var statement = new_if_chain(if_decl)
+  while ctx.idx < ctx.tokens.len and (ctx.current_token().text == "elseif" or ctx.current_token().text == "else"):
+    new_if_branch(statement,parse_if(ctx))
+  statement
+
+proc parse_params(
+  ctx: var TransformerContext
+): seq[Param] =
+  var params: seq[Param] = @[]
+
+  while ctx.idx < ctx.tokens.len and ctx.current_token().kind != tk_paren_close:
+    let tok = ctx.current_token()
+    echo tok.text
+
+    if tok.kind notin {tk_var_identifier, tk_const_identifier}:
+      raise newException(ValueError, "Expected parameter name, got: " & tok.text)
+
+    params.add(Param(name: tok.text))
+    ctx.idx += 1
+    if ctx.current_token().kind != tk_comma and ctx.current_token().kind != tk_paren_close:
+      raise newException(ValueError, "Expected ',' or ')' in parameter list, got: " & tok.text)
+    elif ctx.current_token().kind == tk_comma:
+      ctx.idx += 1
+    else:
+      continue
+  
+
+  match_kind_err(ctx,tk_paren_close, "Expected ')' after parameter list")
+
+  return params
+
+
+proc parse_fn_decl*(
+  ctx: var TransformerContext
+): ref ASTNode =
+  ctx.idx += 1
+
+  let tok = ctx.current_token()
+  if tok.kind notin {tk_var_identifier, tk_const_identifier}:
+    raise newException(ValueError, "Expected function name")
+  let name = tok.text
+  ctx.idx += 1
+
+  match_kind_err(ctx, tk_paren_open, "Missing '(' after function name")
+  let params = parse_params(ctx)
+
+  match_kind_err(ctx, tk_brace_open, "Missing '{' for function body")
+  var body: seq[ref ASTNode] = @[]
+
+  while ctx.idx < ctx.tokens.len and ctx.current_token().kind != tk_brace_close:
+    let stmt = parse_statement(ctx)
+    body.add(stmt)
+
+  match_kind_err(ctx, tk_brace_close, "Missing '}' for function body")
+
+  return new_func(name, params, body)
+
+
+
 proc parse_keyword(ctx: var TransformerContext): ref ASTNode =
   case ctx.current_token().text
   of "let":
@@ -261,7 +458,10 @@ proc parse_keyword(ctx: var TransformerContext): ref ASTNode =
     return parse_var_decl(ctx)
   of "const":
     return parse_var_decl(ctx)
-  
+  of "if":
+    return parse_if_statement(ctx)
+  of "fn":
+    return parse_fn_decl(ctx)
 
 proc parse_statement(ctx: var TransformerContext): ref ASTNode =
   let tok = ctx.current_token()
@@ -282,7 +482,10 @@ proc ast_transformer*(tokens: seq[JulianneToken]): ref ASTNode =
   root.kind = nk_root_node
   root.children = @[]
   while ctx.idx < ctx.tokens.len:
-    echo "Parsing ", ctx.current_token().kind
+    if ctx.current_token().kind == tk_seperator:
+      ctx.idx += 1
+      continue
+
     let statement = parse_statement(ctx)
     statement.parent = root
     root.children.add(statement)

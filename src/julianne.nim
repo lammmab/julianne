@@ -33,10 +33,14 @@ proc main() =
         except ValueError as e:
           echo e.msg
           quit(1)
-        let root: ref ASTNode = ast_transformer(tokenized)
-        printAST(root)
         for tok in tokenized:
           print_token(tok)
+        try:
+          let root: ref ASTNode = ast_transformer(tokenized)
+          printAST(root)
+        except ValueError as e:
+          echo e.msg
+          quit(1)
       except:
         quit(1)
   try:

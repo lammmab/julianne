@@ -1,2 +1,14 @@
-let x = 4 * 7;
-x + 4;
+fn add(a,b) {
+    let c = a + b;
+}
+
+if (true ~= false) {
+    let x = 4+7*4.3;
+} elseif (false == true) {
+    let test = farts;
+} else {
+    let y = test; # test
+}
+
+let test = 4;
+
