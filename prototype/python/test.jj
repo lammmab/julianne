@@ -1,6 +1,3 @@
-var x = 4 + (5.1 * 2) :: float
+var x = 4 + (5.1 * 2) :: int
 var y = 5 :: int
-
-func
-
-print x + y
+x + y

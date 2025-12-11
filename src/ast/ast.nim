@@ -1,3 +1,14 @@
+#[
+ast.nim
+Lammmab - 12/10/25
+
+The main AST structure of the program:
+  - Contains all node objects
+  - Methods for pretty-printing an AST
+  - Automated error handling
+
+]#
+
 import union/union
 import std/tables
 import tokenizer
@@ -331,7 +342,7 @@ proc parse_primary*(ctx: var TransformerContext, expect_unary: bool): ref ASTNod
     ctx.idx += 1
     return new_lit(tok.text,nil)
   else:
-    raise newException(ValueError, "Unexpected token: " & tok.text)
+    raise newException(ValueError, "Unexpected token: " & $tok.kind)
 
 proc parse_expression*(
   ctx: var TransformerContext,
@@ -344,10 +355,13 @@ proc parse_expression*(
     let tok = ctx.current_token()
     if tok.kind != tk_operator or allow_unary:
       break
+
     let prec = get_precedence(tok.text)
     if prec < min_prec:
       break
     ctx.idx += 1
+    if ctx.current_token().kind == tk_operator: 
+      break
     let right = parse_expression(ctx, prec + 1, true)
     left = new_binary_operation(tok.text, left, right, nil)
     allow_unary = false
@@ -362,7 +376,6 @@ proc parse_var_decl*(
   ctx.idx += 1
   match_kind_err(ctx,tk_assign,"Missing equals sign for variable declaration")
   let exp = parse_expression(ctx,0,true)
-  match_kind_err(ctx,tk_seperator,"Missing token seperator ; or \\n")
   let variable = new_var(identifier,exp,nil)
   exp.parent = variable
   variable
@@ -403,7 +416,6 @@ proc parse_params(
 
   while ctx.idx < ctx.tokens.len and ctx.current_token().kind != tk_paren_close:
     let tok = ctx.current_token()
-    echo tok.text
 
     if tok.kind notin {tk_var_identifier, tk_const_identifier}:
       raise newException(ValueError, "Expected parameter name, got: " & tok.text)
@@ -448,8 +460,6 @@ proc parse_fn_decl*(
 
   return new_func(name, params, body)
 
-
-
 proc parse_keyword(ctx: var TransformerContext): ref ASTNode =
   case ctx.current_token().text
   of "let":
@@ -465,13 +475,18 @@ proc parse_keyword(ctx: var TransformerContext): ref ASTNode =
 
 proc parse_statement(ctx: var TransformerContext): ref ASTNode =
   let tok = ctx.current_token()
+  var statement: ref ASTNode
+
   case tok.kind
   of tk_keyword:
-    return parse_keyword(ctx)
+    statement = parse_keyword(ctx)
   else:
-    let expression = parse_expression(ctx,0,true)
-    match_kind_err(ctx,tk_seperator,"Missing token seperator ; or \\n")
-    return expression   
+    statement = parse_expression(ctx, 0, true)
+  
+  if ctx.idx < ctx.tokens.len and ctx.current_token().kind == tk_seperator:
+    ctx.idx += 1
+
+  return statement
 
 proc ast_transformer*(tokens: seq[JulianneToken]): ref ASTNode =
   var ctx = TransformerContext(
@@ -482,6 +497,7 @@ proc ast_transformer*(tokens: seq[JulianneToken]): ref ASTNode =
   root.kind = nk_root_node
   root.children = @[]
   while ctx.idx < ctx.tokens.len:
+    echo "Parsing: ", ctx.current_token().text
     if ctx.current_token().kind == tk_seperator:
       ctx.idx += 1
       continue
