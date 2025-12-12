@@ -1,7 +1,6 @@
 # Julianne
 Julianne language. Interpreted, optionally typed, simplicity focused, and powerful
-https://code.visualstudio.com/api/language-extensions/syntax-highlight-guide#_scope-inspector
-(for myself)
+
 # NOT COMPLETED!!!! does NOT PRODUCE WORKING BYTECODE NOR IS IT A VIRTUAL MACHINE PLATFORM!
 
 ## Building

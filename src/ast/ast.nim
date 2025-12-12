@@ -10,6 +10,12 @@ The main AST structure of the program:
 Usage:
   1. Parse a stream of valid Julianne tokens
   2. Call ast_transformer(tokens)
+
+Todo:
+1. Fix lt_formatted_str case
+2. Implement nk_index (array index access a[el])
+3. Implement nk_call (function call b(bar))
+4. implement nk_member (member access b.c.d)
 ]#
 
 import union/union
@@ -26,8 +32,23 @@ type
     nk_operation,
     nk_var_decl,
     nk_if_chain,
-    nk_func_decl
+    nk_func_decl,
+    nk_while,
+    nk_var_assign,
+
+    nk_return,
+
+    nk_index,
+    nk_call
     
+  Call* = object
+    target: ref ASTNode
+    args: seq[ref ASTNode]
+
+  IndexAccess* = object
+    target: ref ASTNode
+    index: ref ASTNode
+
   LiteralType* = enum 
     lt_str,
     lt_formatted_str,
@@ -42,6 +63,10 @@ type
 
   IfDeclaration* = object 
     if_type: IfType
+    cond: ref ASTNode
+    body: seq[ref ASTNode]
+
+  WhileDeclaration* = object
     cond: ref ASTNode
     body: seq[ref ASTNode]
 
@@ -64,6 +89,10 @@ type
     identifier: string
     params: seq[Param]
     body: seq[ref ASTNode]
+
+  Assignment* = object
+    identifier: ref ASTNode
+    new_value: ref ASTNode
 
   LiteralValue* = object
     case kind: LiteralType
@@ -89,9 +118,57 @@ type
     of nk_var_decl: var_decl: VariableDeclaration
     of nk_if_chain: if_chain: IfChain
     of nk_func_decl: func_decl: FunctionDeclaration
+    of nk_while: loop: WhileDeclaration
+    of nk_var_assign: var_assignment: Assignment
+    of nk_return: val: ref ASTNode
+    of nk_index: access: IndexAccess
+    of nk_call: call: Call
 
-proc new_func(identifier: string, params: seq[Param], body: seq[ref ASTNode]): ref ASTNode =
+proc new_call(target: ref ASTNode, args: seq[ref ASTNode], p: ref ASTNode): ref ASTNode =
+  let n = new ASTNode
+  n.parent = p
+  n.kind = nk_call
+  n.call = Call(target: target, args: args)
+  for arg in args:
+    arg.parent = n
+  return n
+
+proc new_index_access(target: ref ASTNode, index: ref ASTNode, p: ref ASTNode): ref ASTNode =
+  let n = new ASTNode
+  n.parent = p
+  n.kind = nk_index
+  n.access = IndexAccess(target: target, index: index)
+  return n
+
+proc new_return(val: ref ASTNode, p: ref ASTNode): ref ASTNode =
+  let return_stmt = new ASTNode
+  return_stmt.parent = p
+  return_stmt.kind = nk_return
+  return_stmt.val = val
+  return_stmt
+
+proc new_var_assignment(i: ref ASTNode, n_v: ref ASTNode, p: ref ASTNode): ref ASTNode =
+  let assign = new ASTNode
+  assign.parent = p
+  assign.kind = nk_var_assign
+  assign.var_assignment = Assignment(identifier: i, new_value: n_v)
+  assign
+
+proc add_while_statement(n: ref ASTNode, statement: ref ASTNode) =
+  n.loop.body.add(statement)
+  n.children.add(statement)
+  statement.parent = n
+
+proc new_while(cond: ref ASTNode, p: ref ASTNode): ref ASTNode =
+  let while_node = new ASTNode
+  while_node.parent = p
+  while_node.kind = nk_while
+  while_node.loop = WhileDeclaration(cond: cond, body: @[])
+  while_node
+
+proc new_func(identifier: string, params: seq[Param], body: seq[ref ASTNode], p: ref ASTNode): ref ASTNode =
   let fn_node = new ASTNode
+  fn_node.parent = p
   fn_node.kind = nk_func_decl
   fn_node.func_decl = FunctionDeclaration(
     identifier: identifier,
@@ -101,10 +178,10 @@ proc new_func(identifier: string, params: seq[Param], body: seq[ref ASTNode]): r
 
   fn_node.children = @[]
 
-  for stmt in body:
-    if stmt != nil:
-      stmt.parent = fn_node
-      fn_node.children.add(stmt)
+  for statement in body:
+    if statement != nil:
+      statement.parent = fn_node
+      fn_node.children.add(statement)
 
   return fn_node
 
@@ -183,6 +260,17 @@ proc printAST*(node: ref ASTNode, prefix: string = "", isLast: bool = true) =
     label = "Operator(" & node.operation.op & ")"
   of nk_var_decl:
     label = "VariableDeclaration(" & node.var_decl.identifier & ")"
+  of nk_call:
+    label = "FunctionCall"
+    echo prefix & branch & label
+    if node.call.target != nil:
+      echo newPrefix & "├─ Target"
+      printAST(node.call.target, newPrefix & "│  ", true)
+    if node.call.args.len > 0:
+      echo newPrefix & "└─ Args"
+      for i, arg in node.call.args:
+        printAST(arg, newPrefix & "   ", i == node.call.args.len - 1)
+    return
   of nk_if_chain:
     label = "IfChain"
     echo prefix & branch & label
@@ -226,12 +314,50 @@ proc printAST*(node: ref ASTNode, prefix: string = "", isLast: bool = true) =
       echo newPrefix & "└─ Body"
       for i, stmt in node.func_decl.body:
         printAST(stmt, newPrefix & "   ", i == node.func_decl.body.len - 1)
+    return
+  of nk_while:
+    label = "WhileLoop"
+    echo prefix & branch & label
+    if node.loop.cond != nil:
+      echo newPrefix & "├─ Condition"
+      printAST(node.loop.cond, newPrefix & "│  ", true)
+    if node.loop.body.len > 0:
+      echo newPrefix & "└─ Body"
+      for i, stmt in node.loop.body:
+        printAST(stmt, newPrefix & "   ", i == node.loop.body.len - 1)
+    return
+  of nk_var_assign:
+    label = "VariableAssignment"
+    echo prefix & branch & label
+
+    echo newPrefix & "├─ Target"
+    printAST(node.var_assignment.identifier, newPrefix & "│  ", true)
+
+    if node.var_assignment.new_value != nil:
+      echo newPrefix & "└─ Value"
+      printAST(node.var_assignment.new_value, newPrefix & "   ", true)
+    return
+  of nk_return:
+    label = "Return"
+    echo prefix & branch & label
+    if node.val != nil:
+      echo newPrefix & "└─ Value"
+      printAST(node.val, newPrefix & "   ", true)
+    return
+  of nk_index:
+    label = "IndexAccess"
+    echo prefix & branch & label
+
+    if node.access.target != nil:
+      echo newPrefix & "├─ Target"
+      printAST(node.access.target, newPrefix & "│  ", true)
+
+    if node.access.index != nil:
+      echo newPrefix & "└─ Index"
+      printAST(node.access.index, newPrefix & "   ", true)
 
     return
-
-
   echo prefix & branch & label
-
   for i, child in node.children:
     printAST(child, newPrefix, i == node.children.len - 1)
 
@@ -293,18 +419,22 @@ proc parse_expression*(
 ): ref ASTNode
 proc parse_statement(ctx: var TransformerContext): ref ASTNode
 
+
 proc parse_inline_block(
     ctx: var TransformerContext,
     p: ref ASTNode
-): ref ASTNode =
-  match_kind_err(ctx,tk_bracket_open,"Missing '{' for nested block")
-  while ctx.idx < ctx.tokens.len and ctx.current_token().kind != tk_bracket_close:
+): seq[ref ASTNode] =
+  var nodes: seq[ref ASTNode]
+  match_kind_err(ctx,tk_brace_open,"Missing '{' for nested block")
+  while ctx.idx < ctx.tokens.len and ctx.current_token().kind != tk_brace_close:
     let statement = parse_statement(ctx)
     statement.parent = p
     p.children.add(statement)
-  match_kind_err(ctx,tk_bracket_close, "Missing '}' for inline block")
+    nodes.add(statement)
+  match_kind_err(ctx,tk_brace_close, "Missing '}' for inline block")
+  nodes
 
-proc parse_primary*(ctx: var TransformerContext, expect_unary: bool): ref ASTNode =
+proc parse_base_primary*(ctx: var TransformerContext, expect_unary: bool): ref ASTNode =
   if ctx.idx >= ctx.tokens.len:
     raise newException(ValueError, "Unexpected end of input")
 
@@ -346,6 +476,42 @@ proc parse_primary*(ctx: var TransformerContext, expect_unary: bool): ref ASTNod
     return new_lit(tok.text,nil)
   else:
     raise newException(ValueError, "Unexpected token: " & $tok.kind)
+
+proc parse_postfix(
+  ctx: var TransformerContext,
+  exp: ref ASTNode
+): ref ASTNode =
+  var expression = exp
+
+  while ctx.idx < ctx.tokens.len:
+    let tok = ctx.current_token()
+
+    case tok.kind
+    of tk_bracket_open:
+      ctx.idx += 1
+      let idxExpr = parse_expression(ctx, 0, true)
+      match_kind_err(ctx, tk_bracket_close, "Expected ']' after index expression")
+
+      let newNode = new_index_access(expression, idxExpr, nil)
+      idxExpr.parent = newNode
+      expression = newNode
+    of tk_paren_open:
+      ctx.idx += 1
+      var args: seq[ref ASTNode] = @[]
+      while ctx.idx < ctx.tokens.len and ctx.current_token().kind != tk_paren_close:
+        args.add(parse_expression(ctx, 0, true))
+        if ctx.current_token().kind == tk_comma:
+          ctx.idx += 1
+      match_kind_err(ctx, tk_paren_close, "Expected ')' after function call arguments")
+      expression = new_call(expression, args, nil)
+    else:
+      break
+
+  return expression
+
+proc parse_primary*(ctx: var TransformerContext, expect_unary: bool): ref ASTNode =
+  var expression = parse_base_primary(ctx, expect_unary)
+  return parse_postfix(ctx, expression)
 
 proc parse_expression*(
   ctx: var TransformerContext,
@@ -437,7 +603,6 @@ proc parse_params(
 
   return params
 
-
 proc parse_fn_decl*(
   ctx: var TransformerContext
 ): ref ASTNode =
@@ -451,30 +616,60 @@ proc parse_fn_decl*(
 
   match_kind_err(ctx, tk_paren_open, "Missing '(' after function name")
   let params = parse_params(ctx)
+  let fn = new_func(name,params,@[],nil)
+  let nodes = parse_inline_block(ctx,fn)
+  fn.func_decl.body = nodes
 
-  match_kind_err(ctx, tk_brace_open, "Missing '{' for function body")
-  var body: seq[ref ASTNode] = @[]
+  fn
 
-  while ctx.idx < ctx.tokens.len and ctx.current_token().kind != tk_brace_close:
-    let stmt = parse_statement(ctx)
-    body.add(stmt)
+proc parse_while_decl*(
+    ctx: var TransformerContext
+): ref ASTNode =
+  ctx.idx += 1
+  match_kind_err(ctx,tk_paren_open,"Missing opening '(' for while loop")
+  let exp = parse_expression(ctx,0,true)
+  match_kind_err(ctx,tk_paren_close,"Missing closing ')' for while loop")
+  let while_loop = new_while(exp,nil)
+  let child_nodes = parse_inline_block(ctx,while_loop)
+  while_loop.loop.body = child_nodes
+  while_loop
 
-  match_kind_err(ctx, tk_brace_close, "Missing '}' for function body")
+proc parse_return(
+    ctx: var TransformerContext
+): ref ASTNode =
+  ctx.idx += 1 # consume the return
+  var exp: ref ASTNode
+  if not match_kind(ctx,tk_seperator): # idk this is probably right
+    exp = parse_expression(ctx,0,true)
+  return new_return(exp,nil)
 
-  return new_func(name, params, body)
 
 proc parse_keyword(ctx: var TransformerContext): ref ASTNode =
   case ctx.current_token().text
-  of "let":
-    return parse_var_decl(ctx)
-  of "var":
-    return parse_var_decl(ctx)
-  of "const":
+  of "let","var","const":
     return parse_var_decl(ctx)
   of "if":
     return parse_if_statement(ctx)
   of "fn":
     return parse_fn_decl(ctx)
+  of "while":
+    return parse_while_decl(ctx)
+  of "return":
+    return parse_return(ctx)
+
+proc parse_expression_statement(ctx: var TransformerContext): ref ASTNode =
+  let lhs = parse_expression(ctx,0,true)
+  if ctx.idx < ctx.tokens.len and ctx.current_token().kind == tk_assign:
+    ctx.idx += 1
+    let rhs = parse_expression(ctx,0,true)
+    
+    case lhs.kind
+    of nk_identifier,nk_index:
+      return new_var_assignment(lhs,rhs,nil)
+    else:
+      let text = "Invalid assignment target: " % $(lhs.kind)
+      raise newException(ValueError, text)
+  return lhs
 
 proc parse_statement(ctx: var TransformerContext): ref ASTNode =
   let tok = ctx.current_token()
@@ -484,7 +679,7 @@ proc parse_statement(ctx: var TransformerContext): ref ASTNode =
   of tk_keyword:
     statement = parse_keyword(ctx)
   else:
-    statement = parse_expression(ctx, 0, true)
+    statement = parse_expression_statement(ctx)
   
   if ctx.idx < ctx.tokens.len and ctx.current_token().kind == tk_seperator:
     ctx.idx += 1
