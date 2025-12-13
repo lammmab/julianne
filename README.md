@@ -1,4 +1,4 @@
-# Julianne
+![Julianne Logo](logo/wide.png)
 Julianne language. Interpreted, optionally typed, simplicity focused, and powerful
 
 # NOT COMPLETED!!!! does NOT PRODUCE WORKING BYTECODE NOR IS IT A VIRTUAL MACHINE PLATFORM!

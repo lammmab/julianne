@@ -1,0 +1,3 @@
+fn stress() {
+  ((a + b) * (c - d) / (e ^ f)).foo(bar, baz).qux[0]
+}

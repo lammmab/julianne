@@ -13,8 +13,6 @@ Usage:
 
 Todo:
 1. Fix lt_formatted_str case
-2. Implement nk_index (array index access a[el])
-3. Implement nk_call (function call b(bar))
 4. implement nk_member (member access b.c.d)
 ]#
 
