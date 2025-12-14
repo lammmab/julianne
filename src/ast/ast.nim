@@ -47,7 +47,7 @@ type
     target: ref ASTNode
     index: ref ASTNode
 
-  LiteralType* = enum 
+  LiteralType* = enum  
     lt_str,
     lt_formatted_str,
     lt_float,
