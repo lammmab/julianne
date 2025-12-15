@@ -8,7 +8,7 @@ Walks the AST ensuring-
 3. All returns and continues are placed in acceptable spots
 ]#
 
-include ast
+import ast_defs
 
 proc printAST*(node: ref ASTNode, prefix: string = "", isLast: bool = true) =
   let branch = if prefix.len > 0:

@@ -41,10 +41,10 @@ cd julianne
 ```
 3. Build or run the interpreter with:
 ```bash
-nimble -d:nimOldCaseObjects build
+nimble build
 ```
 This will build the interpreter to the specified directory in `julianne.nimble` for usage.
 ```bash
-nimble -d:nimOldCaseObjects run -- FILENAME.jj
+nimble run -- FILENAME.jj
 ```
 This will build the interpreter and run it on a specified file.

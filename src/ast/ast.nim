@@ -15,126 +15,14 @@ Todo:
 1. Fix lt_formatted_str case
 2. Finish class implementation
 3. implement nk_member (member access b.c.d)
-4. Refactor printAST / move logic over to ast_validator bc this file is cluttered atm
 
-5. better node factory?
+4. better node factory?
 
 ]#
+include token_defs
+include ast_defs
 
-import union/union
-import std/tables
-import tokenizer
 import strutils
-type None = object
-
-type
-  NodeKind* = enum 
-    nk_root_node, 
-    nk_literal, 
-    nk_identifier, 
-    nk_operation,
-    nk_var_decl,
-    nk_if_chain,
-    nk_func_decl,
-    nk_while,
-    nk_var_assign,
-
-    nk_return,
-
-    nk_index,
-    nk_call
-    
-  Call* = object
-    target: ref ASTNode
-    args: seq[ref ASTNode]
-
-  IndexAccess* = object
-    target: ref ASTNode
-    index: ref ASTNode
-
-  LiteralType* = enum  
-    lt_str,
-    lt_formatted_str,
-    lt_float,
-    lt_int,
-    lt_arr,
-
-  IfType* = enum 
-    it_if,
-    it_elseif,
-    it_else
-
-  ObjectDeclaration* = object
-    identifier: string
-    fields: seq[ref ASTNode]
-    methods: seq[ref ASTNode]
-
-  MemberAccess* = object
-    target: ref ASTNode
-    property: ref ASTNode
-
-  IfDeclaration* = object 
-    if_type: IfType
-    cond: ref ASTNode
-    body: seq[ref ASTNode]
-
-  WhileDeclaration* = object
-    cond: ref ASTNode
-    body: seq[ref ASTNode]
-
-  IfChain* = object
-    branches: seq[IfDeclaration]
-
-  ArrayLiteral* = object
-    elements*: seq[ref ASTNode]
-
-  VariableDeclaration* = object
-    identifier: string
-    initializer: ref ASTNode
-    
-  Param* = object
-    name: string
-    paramType: ref ASTNode
-    defaultValue: ref ASTNode
-
-  FunctionDeclaration* = object
-    identifier: string
-    params: seq[Param]
-    body: seq[ref ASTNode]
-
-  Assignment* = object
-    identifier: ref ASTNode
-    new_value: ref ASTNode
-
-  LiteralValue* = object
-    case kind: LiteralType
-    of lt_str: str_val: string
-    of lt_formatted_str: formatted_str_val: seq[ref ASTNode]
-    of lt_float: float_val: float
-    of lt_arr: arr_val: ArrayLiteral
-    of lt_int: int_val: int
-
-  Operation* = object
-    op: string
-    left: ref ASTNode
-    right: ref ASTNode
-
-  ASTNode* = object
-    parent*: ref ASTNode
-    children*: seq[ref ASTNode]
-    case kind: NodeKind
-    of nk_root_node: discard
-    of nk_literal: literal: LiteralValue
-    of nk_identifier: identifier_name: string
-    of nk_operation: operation: Operation
-    of nk_var_decl: var_decl: VariableDeclaration
-    of nk_if_chain: if_chain: IfChain
-    of nk_func_decl: func_decl: FunctionDeclaration
-    of nk_while: loop: WhileDeclaration
-    of nk_var_assign: var_assignment: Assignment
-    of nk_return: val: ref ASTNode
-    of nk_index: access: IndexAccess
-    of nk_call: call: Call
 
 proc link_relationship(parent: ref ASTNode, child: ref ASTNode) =
   if parent != nil and child != nil:
@@ -182,7 +70,6 @@ proc new_var_assignment(i: ref ASTNode, n_v: ref ASTNode, p: ref ASTNode): ref A
   link_relationship(n, i)
   link_relationship(n, n_v)
   n
-
 
 proc new_while(cond: ref ASTNode, body: seq[ref ASTNode], p: ref ASTNode): ref ASTNode =
   let n = new_node(p,nk_while)
@@ -280,17 +167,28 @@ type
 func current_token(c: TransformerContext): JulianneToken =
   return c.tokens[c.idx]
 
-func advance_token(c: var TransformerContext): JulianneToken =
+func advance_token(c: var TransformerContext): JulianneToken {.discardable.} =
   let cur = c.current_token()
   c.idx += 1
   return cur
 
 proc match_kind(ctx: var TransformerContext, kind: TokenKind): bool = 
   if ctx.idx < ctx.tokens.len and ctx.tokens[ctx.idx].kind == kind: 
-    discard ctx.advance_token()
+    ctx.advance_token()
     return true 
   else: 
     return false
+
+proc match_kind_multiple(
+  ctx: var TransformerContext,
+  kinds: varargs[TokenKind]
+): bool =
+  let tok_kind = ctx.current_token().kind
+  for kind in kinds:
+    if kind == tok_kind:
+      return true
+  return false
+
 
 proc match_kind_err(ctx: var TransformerContext, kind: TokenKind, err: string) =
   if not match_kind(ctx,kind):
@@ -311,7 +209,6 @@ proc parse_parenthesized_exp(
   let exp: ref ASTNode = parse_expression(ctx,0,true)
   match_kind_err(ctx,tk_paren_close,"Missing closing ')'")
   exp
-
 
 proc parse_nested_block(
   ctx: var TransformerContext
@@ -351,7 +248,7 @@ proc parse_base_primary*(ctx: var TransformerContext, expect_unary: bool): ref A
     while ctx.idx < ctx.tokens.len and ctx.current_token().kind != tk_bracket_close:
       elements.add(parse_expression(ctx,0,true))
       if ctx.current_token().kind == tk_comma:
-        discard ctx.advance_token()
+        ctx.advance_token()
     match_kind_err(ctx,tk_bracket_close,"Expected closing ']' for array")
     return new_lit(ArrayLiteral(elements: elements), nil)
   of tk_string_normal,tk_string_raw,tk_string_formatted:
@@ -370,14 +267,14 @@ proc parse_postfix(
 
     case tok.kind
     of tk_bracket_open:
-      discard ctx.advance_token()
+      ctx.advance_token()
       let idx_expr = parse_expression(ctx, 0, true)
       match_kind_err(ctx, tk_bracket_close, "Expected ']' after index expression")
 
       let id_access = new_index_access(expression, idx_expr, nil)
       expression = id_access
     of tk_paren_open:
-      discard ctx.advance_token()
+      ctx.advance_token()
       var args: seq[ref ASTNode] = @[]
       while ctx.idx < ctx.tokens.len and ctx.current_token().kind != tk_paren_close:
         args.add(parse_expression(ctx, 0, true))
@@ -494,7 +391,7 @@ proc parse_fn_decl*(
 proc parse_while_decl*(
     ctx: var TransformerContext
 ): ref ASTNode =
-  ctx.idx += 1
+  ctx.advance_token()
   let exp = parse_parenthesized_exp(ctx)
   let child_nodes = parse_nested_block(ctx)
   let while_loop = new_while(exp,child_nodes,nil)
@@ -503,18 +400,18 @@ proc parse_while_decl*(
 proc parse_return(
     ctx: var TransformerContext
 ): ref ASTNode =
-  ctx.idx += 1 # consume the return
+  ctx.advance_token()
   var exp: ref ASTNode
-  if not match_kind(ctx,tk_seperator): # idk this is probably right
+  if not match_kind_multiple(ctx,tk_seperator,tk_brace_close):
     exp = parse_expression(ctx,0,true)
   return new_return(exp,nil)
 
 proc parse_object_decl(
   ctx: var TransformerContext
 ): ref ASTNode =
-  ctx.idx += 1 # consume the "class" keyword
-  var ident: string = ctx.current_token().text
-  ctx.idx += 1 # consume the identifier
+  ctx.advance_token()
+
+  let ident: string = ctx.advance_token().text
   let nodes = parse_nested_block(ctx)
   raise newException(ValueError, "Classes not implemented")
   

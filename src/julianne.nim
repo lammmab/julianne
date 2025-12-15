@@ -1,7 +1,9 @@
-include parser
-include tokenizer
 import argparse
 import os, sequtils, std/strutils
+
+include parser
+include ast
+include tokenizer
 include ast_validator
 
 proc extract_file_contents(filename: string): string =
@@ -13,36 +15,51 @@ proc extract_file_contents(filename: string): string =
     echo "Error when opening file ", filename
     quit(1)
 
+proc parse_file(contents: string): seq[string] =
+  try:
+    return parse(contents)
+  except ValueError as e:
+    echo "Parse error: ", e.msg
+    quit(1)
+
+proc tokenize_file(contents: seq[string]): seq[JulianneToken] =
+  try:
+    return tokenize(contents)
+  except ValueError as e:
+    echo "Tokenization error: ", e.msg
+    quit(1)
+
+proc transform_ast(tokens: seq[JulianneToken]): ref ASTNode =
+  try:
+    return ast_transformer(tokens)
+  except ValueError as e:
+    echo "AST transformation error: ", e.msg
+    quit(1)
+
 proc main() =
-  var p = newParser:  
+  var p = newParser:
     arg("filename", help="File to interpret")
-    
+
     run:
       let filename = opts.filename
-      
-      if not endsWith(filename,".jj"):
+
+      if not endsWith(filename, ".jj"):
         echo "Cannot interpret non-Julianne file; fatal"
         quit(1)
+
       echo "Processing file: ", filename
-      try:
-        let contents: seq[string] = parse(extract_file_contents(filename))
-        echo $contents
-        var tokenized: seq[JulianneToken]
-        try:
-          tokenized = tokenize(contents)
-        except ValueError as e:
-          echo e.msg
-          quit(1)
-        for tok in tokenized:
-          print_token(tok)
-        try:
-          let root: ref ASTNode = ast_transformer(tokenized)
-          printAST(root)
-        except ValueError as e:
-          echo e.msg
-          quit(1)
-      except:
-        quit(1)
+
+      let contents = extract_file_contents(filename)
+      let parsed = parse_file(contents)
+      echo $parsed
+
+      let tokenized = tokenize_file(parsed)
+      for tok in tokenized:
+        print_token(tok)
+
+      let root = transform_ast(tokenized)
+      printAST(root)
+
   try:
     p.run()
   except UsageError as e:
