@@ -1,5 +1,5 @@
-fn add(a,b) {
-    return a + b;
+if (test) {
+    print("Works!")
+} else {
+    print("Doesn't work. Sucks to suck.")
 }
-
-print(add(5,4))

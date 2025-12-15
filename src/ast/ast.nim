@@ -15,6 +15,10 @@ Todo:
 1. Fix lt_formatted_str case
 2. Finish class implementation
 3. implement nk_member (member access b.c.d)
+4. Refactor printAST / move logic over to ast_validator bc this file is cluttered atm
+
+5. better node factory?
+
 ]#
 
 import union/union
@@ -147,35 +151,44 @@ proc new_node(parent: ref ASTNode, kind: NodeKind): ref ASTNode =
   n.kind = kind
   n
 
+proc new_root(c: seq[ref ASTNode]): ref ASTNode =
+  let n = new_node(nil,nk_root_node)
+  link_relationship_multiple(n,c)
+  n
+
 proc new_call(target: ref ASTNode, args: seq[ref ASTNode], p: ref ASTNode): ref ASTNode =
   let n = new_node(p,nk_call)
   n.call = Call(target: target, args: args)
-  link_relationship_multiple(n,args)
+  link_relationship(n, target)
+  link_relationship_multiple(n, args)
   n
 
-proc new_index_access(target: ref ASTNode, index: ref ASTNode, p: ref ASTNode): ref ASTNode =
-  let n = new_node(p,nk_index)
+proc new_index_access(target, index, p: ref ASTNode): ref ASTNode =
+  let n = new_node(p, nk_index)
   n.access = IndexAccess(target: target, index: index)
+  link_relationship(n, target)
+  link_relationship(n, index)
   n
 
 proc new_return(val: ref ASTNode, p: ref ASTNode): ref ASTNode =
-  let n = new_node(p,nk_return)
+  let n = new_node(p, nk_return)
   n.val = val
+  link_relationship(n, val)
   n
 
 proc new_var_assignment(i: ref ASTNode, n_v: ref ASTNode, p: ref ASTNode): ref ASTNode =
-  let n = new_node(p,nk_var_assign)
+  let n = new_node(p, nk_var_assign)
   n.var_assignment = Assignment(identifier: i, new_value: n_v)
+  link_relationship(n, i)
+  link_relationship(n, n_v)
   n
 
-proc add_while_statement(n: ref ASTNode, statement: ref ASTNode) =
-  n.loop.body.add(statement)
-  n.children.add(statement)
-  statement.parent = n
 
-proc new_while(cond: ref ASTNode, p: ref ASTNode): ref ASTNode =
+proc new_while(cond: ref ASTNode, body: seq[ref ASTNode], p: ref ASTNode): ref ASTNode =
   let n = new_node(p,nk_while)
-  n.loop = WhileDeclaration(cond: cond, body: @[])
+  n.loop = WhileDeclaration(cond: cond, body: body)
+  link_relationship(n, cond)
+  link_relationship_multiple(n, body)
   n
 
 proc new_func(identifier: string, params: seq[Param], body: seq[ref ASTNode], p: ref ASTNode): ref ASTNode =
@@ -196,6 +209,9 @@ proc match_if(text: string): IfType =
     return it_elseif
   elif text == "else":
     return it_else
+  else:
+    raise newException(ValueError, "Invalid if keyword: " & text)
+
 
 proc new_if_branch(statement: ref ASTNode, if_decl: IfDeclaration) =
   statement.if_chain.branches.add(if_decl)
@@ -214,11 +230,9 @@ proc new_var(name: string, initializer: ref ASTNode, p: ref ASTNode): ref ASTNod
   n
 
 proc new_ident(name: string,p: ref ASTNode): ref ASTNode =
-  let ident = new ASTNode
-  ident.parent = p
-  ident.kind = nk_identifier
-  ident.identifier_name = name
-  ident
+  let n = new_node(p,nk_identifier)
+  n.identifier_name = name
+  n
 
 proc new_lit[T](v: T, p: ref ASTNode): ref ASTNode =
   let val: LiteralValue = 
@@ -229,11 +243,9 @@ proc new_lit[T](v: T, p: ref ASTNode): ref ASTNode =
     elif T is ArrayLiteral: LiteralValue(kind: lt_arr, arr_val: v)
     else: static: doAssert false, "Unsupported literal type"
 
-  let litNode = new ASTNode
-  litNode.parent = p
-  litNode.kind = nk_literal
-  litNode.literal = val
-  return litNode
+  let n = new_node(p,nk_literal)
+  n.literal = val
+  n
 
 proc printAST*(node: ref ASTNode, prefix: string = "", isLast: bool = true) =
   let branch = if prefix.len > 0:
@@ -366,18 +378,17 @@ proc printAST*(node: ref ASTNode, prefix: string = "", isLast: bool = true) =
       printAST(node.operation.right, newPrefix, true)
   
 proc new_unary_operation(op: string, left: ref ASTNode, p: ref ASTNode): ref ASTNode =
-  let un = new ASTNode
-  un.parent = p
-  un.kind = nk_operation
-  un.operation = Operation(op: op, left: left)
-  un
+  let n = new_node(p,nk_operation)
+  n.operation = Operation(op: op, left: left)
+  link_relationship(n, left)
+  n
 
 proc new_binary_operation(op: string, left: ref ASTNode, right: ref ASTNode, p: ref ASTNode): ref ASTNode =
-  let bin = new ASTNode
-  bin.parent = p
-  bin.kind = nk_operation
-  bin.operation = Operation(op: op, left: left, right: right)
-  bin
+  let n = new_node(p,nk_operation)
+  n.operation = Operation(op: op, left: left, right: right)
+  link_relationship(n, left)
+  link_relationship(n, right)
+  n
 
 let operator_precedence_seq: seq[tuple[id: string, number: int]] = @[
   ("^", 12), ("~", 11), ("*", 10), ("/", 10), ("%", 10),
@@ -386,8 +397,9 @@ let operator_precedence_seq: seq[tuple[id: string, number: int]] = @[
 ]
 
 proc get_precedence(op: string): int =
-  for o, p in operator_precedence_seq:
-    if p.id == op: return p.number
+  for item in operator_precedence_seq:
+    if item.id == op:
+      return item.number
   return 1
 
 type
@@ -417,18 +429,22 @@ proc parse_expression*(
 ): ref ASTNode
 proc parse_statement(ctx: var TransformerContext): ref ASTNode
 
+proc parse_parenthesized_exp(
+  ctx: var TransformerContext
+): ref ASTNode =
+  match_kind_err(ctx,tk_paren_open,"Missing opening '('")
+  let exp: ref ASTNode = parse_expression(ctx,0,true)
+  match_kind_err(ctx,tk_paren_close,"Missing closing ')'")
+  exp
 
-proc parse_inline_block(
-    ctx: var TransformerContext,
-    p: ref ASTNode
+
+proc parse_nested_block(
+  ctx: var TransformerContext
 ): seq[ref ASTNode] =
   var nodes: seq[ref ASTNode]
   match_kind_err(ctx,tk_brace_open,"Missing '{' for nested block")
   while ctx.idx < ctx.tokens.len and ctx.current_token().kind != tk_brace_close:
-    let statement = parse_statement(ctx)
-    statement.parent = p
-    p.children.add(statement)
-    nodes.add(statement)
+    nodes.add(parse_statement(ctx))
   match_kind_err(ctx,tk_brace_close, "Missing '}' for inline block")
   nodes
 
@@ -487,12 +503,11 @@ proc parse_postfix(
     case tok.kind
     of tk_bracket_open:
       ctx.idx += 1
-      let idxExpr = parse_expression(ctx, 0, true)
+      let idx_expr = parse_expression(ctx, 0, true)
       match_kind_err(ctx, tk_bracket_close, "Expected ']' after index expression")
 
-      let newNode = new_index_access(expression, idxExpr, nil)
-      idxExpr.parent = newNode
-      expression = newNode
+      let id_access = new_index_access(expression, idx_expr, nil)
+      expression = id_access
     of tk_paren_open:
       ctx.idx += 1
       var args: seq[ref ASTNode] = @[]
@@ -544,7 +559,6 @@ proc parse_var_decl*(
   match_kind_err(ctx,tk_assign,"Missing equals sign for variable declaration")
   let exp = parse_expression(ctx,0,true)
   let variable = new_var(identifier,exp,nil)
-  exp.parent = variable
   variable
   
 proc parse_if*(
@@ -555,17 +569,10 @@ proc parse_if*(
 
   var exp: ref ASTNode
   if if_type != it_else:
-    match_kind_err(ctx,tk_paren_open,"Missing opening '(' for if statement")
-    exp = parse_expression(ctx,0,true)
-    match_kind_err(ctx,tk_paren_close,"Missing closing ')' for if statement")
+    exp = parse_parenthesized_exp(ctx)
 
-  match_kind_err(ctx,tk_brace_open,"Missing opening '{' for if statement")
-  var decl = IfDeclaration(if_type: if_type, cond: exp, body: @[])
-  while ctx.idx < ctx.tokens.len and ctx.current_token().text != "}":
-    let statement = parse_statement(ctx)
-    decl.body.add(statement)
-  match_kind_err(ctx,tk_brace_close,"Missing closing '}' for if statement")
-  decl
+  let nodes = parse_nested_block(ctx)
+  return IfDeclaration(if_type: if_type, cond: exp, body: nodes)
 
 proc parse_if_statement*(
   ctx: var TransformerContext
@@ -614,22 +621,16 @@ proc parse_fn_decl*(
 
   match_kind_err(ctx, tk_paren_open, "Missing '(' after function name")
   let params = parse_params(ctx)
-  let fn = new_func(name,params,@[],nil)
-  let nodes = parse_inline_block(ctx,fn)
-  fn.func_decl.body = nodes
-
-  fn
+  let nodes = parse_nested_block(ctx)
+  return new_func(name,params,nodes,nil)
 
 proc parse_while_decl*(
     ctx: var TransformerContext
 ): ref ASTNode =
   ctx.idx += 1
-  match_kind_err(ctx,tk_paren_open,"Missing opening '(' for while loop")
-  let exp = parse_expression(ctx,0,true)
-  match_kind_err(ctx,tk_paren_close,"Missing closing ')' for while loop")
-  let while_loop = new_while(exp,nil)
-  let child_nodes = parse_inline_block(ctx,while_loop)
-  while_loop.loop.body = child_nodes
+  let exp = parse_parenthesized_exp(ctx)
+  let child_nodes = parse_nested_block(ctx)
+  let while_loop = new_while(exp,child_nodes,nil)
   while_loop
 
 proc parse_return(
@@ -646,7 +647,8 @@ proc parse_object_decl(
 ): ref ASTNode =
   ctx.idx += 1 # consume the "class" keyword
   var ident: string = ctx.current_token().text
-  let nodes = parse_inline_block(ctx,nil)
+  ctx.idx += 1 # consume the identifier
+  let nodes = parse_nested_block(ctx)
   raise newException(ValueError, "Classes not implemented")
   
 
@@ -699,9 +701,8 @@ proc ast_transformer*(tokens: seq[JulianneToken]): ref ASTNode =
     idx: 0,
     tokens: tokens
   )
-  let root = new ASTNode
-  root.kind = nk_root_node
-  root.children = @[]
+
+  var statements: seq[ref ASTNode] = @[]
   while ctx.idx < ctx.tokens.len:
     echo "Parsing: ", ctx.current_token().text
     if ctx.current_token().kind == tk_seperator:
@@ -709,7 +710,5 @@ proc ast_transformer*(tokens: seq[JulianneToken]): ref ASTNode =
       continue
 
     let statement = parse_statement(ctx)
-    statement.parent = root
-    root.children.add(statement)
-
-  return root
+    statements.add(statement)
+  return new_root(statements)
