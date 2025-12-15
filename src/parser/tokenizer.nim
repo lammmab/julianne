@@ -1,4 +1,5 @@
 import strutils
+import re
 
 type
   TokenKind* = enum
@@ -21,7 +22,9 @@ type
     tk_seperator,
     tk_keyword,
     tk_assign,
-    tk_member_access
+    tk_member_access,
+    tk_object_identifier,
+    tk_type_annotation
 
   JulianneToken* = ref object
     kind*: TokenKind
@@ -32,6 +35,7 @@ const keywords = [
   "var", 
   "const", 
   "fn", 
+  "class",
   "if", 
   "else", 
   "elseif", 
@@ -120,6 +124,10 @@ proc is_const_identifier(s: string): bool =
       return false
   return true
 
+proc is_object_identifier(s: string): bool =
+  s.match(re"^[A-Z]+[A-Za-z]+$")
+
+
 proc print_token*(t: JulianneToken) =
   echo "Token(kind=$1,text=$2)" % [$t.kind,escape(t.text)]
 
@@ -151,13 +159,15 @@ proc match_symbol(text: string): TokenKind =
     return tk_comma
   of ";":
     return tk_seperator
+  of "::":
+    return tk_type_annotation
   of "\n":
     return tk_seperator
   else:
     if is_operator(text):
       return tk_operator
     else:
-      raise newException(ValueError, "Unknown operator, " & text)
+      raise newException(ValueError, "Unknown operator: " & text)
 
 proc match_str_to_token(text: string): TokenKind =
   try:
@@ -178,6 +188,8 @@ proc match_str_to_token(text: string): TokenKind =
     return tk_const_identifier
   elif is_var_identifier(normalized):
     return tk_var_identifier
+  elif is_object_identifier(normalized):
+    return tk_object_identifier
   else:
     return match_symbol(normalized)
 

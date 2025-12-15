@@ -13,7 +13,8 @@ Usage:
 
 Todo:
 1. Fix lt_formatted_str case
-4. implement nk_member (member access b.c.d)
+2. Finish class implementation
+3. implement nk_member (member access b.c.d)
 ]#
 
 import union/union
@@ -58,6 +59,15 @@ type
     it_if,
     it_elseif,
     it_else
+
+  ObjectDeclaration* = object
+    identifier: string
+    fields: seq[ref ASTNode]
+    methods: seq[ref ASTNode]
+
+  MemberAccess* = object
+    target: ref ASTNode
+    property: ref ASTNode
 
   IfDeclaration* = object 
     if_type: IfType
@@ -122,35 +132,41 @@ type
     of nk_index: access: IndexAccess
     of nk_call: call: Call
 
-proc new_call(target: ref ASTNode, args: seq[ref ASTNode], p: ref ASTNode): ref ASTNode =
+proc link_relationship(parent: ref ASTNode, child: ref ASTNode) =
+  if parent != nil and child != nil:
+    parent.children.add(child)
+    child.parent = parent
+
+proc link_relationship_multiple(parent: ref ASTNode, children: seq[ref ASTNode]) =
+  for child in children:
+    link_relationship(parent,child)
+
+proc new_node(parent: ref ASTNode, kind: NodeKind): ref ASTNode =
   let n = new ASTNode
-  n.parent = p
-  n.kind = nk_call
+  link_relationship(parent,n)
+  n.kind = kind
+  n
+
+proc new_call(target: ref ASTNode, args: seq[ref ASTNode], p: ref ASTNode): ref ASTNode =
+  let n = new_node(p,nk_call)
   n.call = Call(target: target, args: args)
-  for arg in args:
-    arg.parent = n
-  return n
+  link_relationship_multiple(n,args)
+  n
 
 proc new_index_access(target: ref ASTNode, index: ref ASTNode, p: ref ASTNode): ref ASTNode =
-  let n = new ASTNode
-  n.parent = p
-  n.kind = nk_index
+  let n = new_node(p,nk_index)
   n.access = IndexAccess(target: target, index: index)
-  return n
+  n
 
 proc new_return(val: ref ASTNode, p: ref ASTNode): ref ASTNode =
-  let return_stmt = new ASTNode
-  return_stmt.parent = p
-  return_stmt.kind = nk_return
-  return_stmt.val = val
-  return_stmt
+  let n = new_node(p,nk_return)
+  n.val = val
+  n
 
 proc new_var_assignment(i: ref ASTNode, n_v: ref ASTNode, p: ref ASTNode): ref ASTNode =
-  let assign = new ASTNode
-  assign.parent = p
-  assign.kind = nk_var_assign
-  assign.var_assignment = Assignment(identifier: i, new_value: n_v)
-  assign
+  let n = new_node(p,nk_var_assign)
+  n.var_assignment = Assignment(identifier: i, new_value: n_v)
+  n
 
 proc add_while_statement(n: ref ASTNode, statement: ref ASTNode) =
   n.loop.body.add(statement)
@@ -158,30 +174,20 @@ proc add_while_statement(n: ref ASTNode, statement: ref ASTNode) =
   statement.parent = n
 
 proc new_while(cond: ref ASTNode, p: ref ASTNode): ref ASTNode =
-  let while_node = new ASTNode
-  while_node.parent = p
-  while_node.kind = nk_while
-  while_node.loop = WhileDeclaration(cond: cond, body: @[])
-  while_node
+  let n = new_node(p,nk_while)
+  n.loop = WhileDeclaration(cond: cond, body: @[])
+  n
 
 proc new_func(identifier: string, params: seq[Param], body: seq[ref ASTNode], p: ref ASTNode): ref ASTNode =
-  let fn_node = new ASTNode
-  fn_node.parent = p
-  fn_node.kind = nk_func_decl
-  fn_node.func_decl = FunctionDeclaration(
+  let n = new_node(p,nk_func_decl)
+  n.func_decl = FunctionDeclaration(
     identifier: identifier,
     params: params,
     body: body
   )
 
-  fn_node.children = @[]
-
-  for statement in body:
-    if statement != nil:
-      statement.parent = fn_node
-      fn_node.children.add(statement)
-
-  return fn_node
+  link_relationship_multiple(n,body)
+  n
 
 proc match_if(text: string): IfType =
   if text == "if":
@@ -202,16 +208,10 @@ proc new_if_chain(branch: IfDeclaration): ref ASTNode =
   chain
 
 proc new_var(name: string, initializer: ref ASTNode, p: ref ASTNode): ref ASTNode =
-  let variable = new ASTNode
-  variable.parent = p
-  variable.kind = nk_var_decl
-  variable.var_decl = VariableDeclaration(identifier: name, initializer: initializer)
-  if initializer != nil:
-    variable.children = @[initializer]
-    initializer.parent = variable
-  else:
-    variable.children = @[]
-  variable
+  let n = new_node(p,nk_var_decl)
+  n.var_decl = VariableDeclaration(identifier: name, initializer: initializer)
+  link_relationship(n,initializer)
+  n
 
 proc new_ident(name: string,p: ref ASTNode): ref ASTNode =
   let ident = new ASTNode
@@ -265,7 +265,7 @@ proc printAST*(node: ref ASTNode, prefix: string = "", isLast: bool = true) =
       echo newPrefix & "├─ Target"
       printAST(node.call.target, newPrefix & "│  ", true)
     if node.call.args.len > 0:
-      echo newPrefix & "└─ Args"
+      echo newPrefix & "└─ Arguments"
       for i, arg in node.call.args:
         printAST(arg, newPrefix & "   ", i == node.call.args.len - 1)
     return
@@ -297,7 +297,7 @@ proc printAST*(node: ref ASTNode, prefix: string = "", isLast: bool = true) =
     label = "FunctionDeclaration(" & node.func_decl.identifier & ")"
     echo prefix & branch & label
     if node.func_decl.params.len > 0:
-      echo newPrefix & "├─ Params"
+      echo newPrefix & "├─ Parameters"
       for i, p in node.func_decl.params:
         let isLastParam = i == node.func_decl.params.len - 1
         let pfx = newPrefix & (if not isLastParam: "│  " else: "   ")
@@ -641,6 +641,14 @@ proc parse_return(
     exp = parse_expression(ctx,0,true)
   return new_return(exp,nil)
 
+proc parse_object_decl(
+  ctx: var TransformerContext
+): ref ASTNode =
+  ctx.idx += 1 # consume the "class" keyword
+  var ident: string = ctx.current_token().text
+  let nodes = parse_inline_block(ctx,nil)
+  raise newException(ValueError, "Classes not implemented")
+  
 
 proc parse_keyword(ctx: var TransformerContext): ref ASTNode =
   case ctx.current_token().text
@@ -654,6 +662,8 @@ proc parse_keyword(ctx: var TransformerContext): ref ASTNode =
     return parse_while_decl(ctx)
   of "return":
     return parse_return(ctx)
+  of "class":
+    return parse_object_decl(ctx)
 
 proc parse_expression_statement(ctx: var TransformerContext): ref ASTNode =
   let lhs = parse_expression(ctx,0,true)

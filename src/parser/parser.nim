@@ -7,7 +7,7 @@ let julianne_parser = peg("program", d: Dict):
   program <- WS * statements * WS
   statements <- line * *(line_sep * line)
   line <- EOF | ONE_LINE_COMMENT | MULTI_LINE_COMMENT | statement
-  statement <- var_declare | const_declare | return_stmt | keyword | while_loop | function_declare | var_assign | if_statement | primary_expr | E"Expected a statement"
+  statement <- var_declare | const_declare | class_decl | return_stmt | keyword | while_loop | function_declare | var_assign | if_statement | primary_expr | E"Expected a statement"
 
   ONE_LINE_COMMENT <- '#' * *(!NL * 1)
   MULTI_LINE_COMMENT <- ";[" * *(!"];" * 1) * "];"
@@ -18,7 +18,13 @@ let julianne_parser = peg("program", d: Dict):
   EOF <- !1
   EMPTY_LINE <- WS * SKIP * WS
 
-  obj_ident <- WS * "::" * WS * obj_name
+  lazy_var_decl <- WS * var_ident * WS * obj_ident * WS
+  class_statement <- lazy_var_decl | function_declare
+  class_body <- >"{" * WS * *(*NL * WS * ((!"}" * class_statement) * nested_sep) * WS) * *NL * WS * >"}" | E"Malformed class body"
+  class_decl <- WS * >"class" * WS * >obj_name_err * WS * class_body
+  obj_ident <- WS * >"::" * WS * >obj_name
+
+  obj_name_err <- obj_name | E"Malformed object name"
   obj_name <- +{'A'..'Z'} * +({'A'..'Z'} | {'a'..'z'})
 
   nested_sep <- WS * (sep) * WS
