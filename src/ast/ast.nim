@@ -246,136 +246,6 @@ proc new_lit[T](v: T, p: ref ASTNode): ref ASTNode =
   let n = new_node(p,nk_literal)
   n.literal = val
   n
-
-proc printAST*(node: ref ASTNode, prefix: string = "", isLast: bool = true) =
-  let branch = if prefix.len > 0:
-                 if isLast: "└─ " else: "├─ "
-               else: ""
-  let newPrefix = prefix & (if isLast: "   " else: "│  ")
-
-  var label = ""
-  case node.kind
-  of nk_root_node:
-    label = "(ROOT)"
-  of nk_literal:
-    case node.literal.kind
-    of lt_int: label = "Literal(int: " & $node.literal.int_val & ")"
-    of lt_float: label = "Literal(float: " & $node.literal.float_val & ")"
-    of lt_str: label = "Literal(str: '" & node.literal.str_val & "')"
-    of lt_formatted_str: label = "Literal(formatted_str)"
-    of lt_arr: label = "Literal(array)"
-  of nk_identifier:
-    label = "Identifier(" & node.identifier_name & ")"
-  of nk_operation:
-    label = "Operator(" & node.operation.op & ")"
-  of nk_var_decl:
-    label = "VariableDeclaration(" & node.var_decl.identifier & ")"
-  of nk_call:
-    label = "FunctionCall"
-    echo prefix & branch & label
-    if node.call.target != nil:
-      echo newPrefix & "├─ Target"
-      printAST(node.call.target, newPrefix & "│  ", true)
-    if node.call.args.len > 0:
-      echo newPrefix & "└─ Arguments"
-      for i, arg in node.call.args:
-        printAST(arg, newPrefix & "   ", i == node.call.args.len - 1)
-    return
-  of nk_if_chain:
-    label = "IfChain"
-    echo prefix & branch & label
-
-    for i, br in node.if_chain.branches:
-      let isLastBranch = i == node.if_chain.branches.len - 1
-      let branchPrefix = newPrefix & (if not isLastBranch: "├─ " else: "└─ ")
-
-      let t =
-        case br.if_type
-        of it_if: "if"
-        of it_elseif: "elseif"
-        of it_else: "else"
-
-      echo branchPrefix & t
-
-      if br.if_type != it_else:
-        printAST(br.cond, newPrefix & (if not isLastBranch: "│  " else: "   "), true)
-
-      if br.body.len > 0:
-        echo newPrefix & (if not isLastBranch: "│  " else: "   ") & "Body"
-        for j, stmt in br.body:
-          printAST(stmt, newPrefix & (if not isLastBranch: "│  " else: "   ") & "   ", j == br.body.len - 1)
-    return
-  of nk_func_decl:
-    label = "FunctionDeclaration(" & node.func_decl.identifier & ")"
-    echo prefix & branch & label
-    if node.func_decl.params.len > 0:
-      echo newPrefix & "├─ Parameters"
-      for i, p in node.func_decl.params:
-        let isLastParam = i == node.func_decl.params.len - 1
-        let pfx = newPrefix & (if not isLastParam: "│  " else: "   ")
-        echo pfx & (if isLastParam: "└─ " else: "├─ ") & "Param(" & p.name & ")"
-        if p.defaultValue != nil:
-          printAST(
-            p.defaultValue,
-            pfx & (if isLastParam: "   " else: "│  "),
-            true
-          )
-    if node.func_decl.body.len > 0:
-      echo newPrefix & "└─ Body"
-      for i, stmt in node.func_decl.body:
-        printAST(stmt, newPrefix & "   ", i == node.func_decl.body.len - 1)
-    return
-  of nk_while:
-    label = "WhileLoop"
-    echo prefix & branch & label
-    if node.loop.cond != nil:
-      echo newPrefix & "├─ Condition"
-      printAST(node.loop.cond, newPrefix & "│  ", true)
-    if node.loop.body.len > 0:
-      echo newPrefix & "└─ Body"
-      for i, stmt in node.loop.body:
-        printAST(stmt, newPrefix & "   ", i == node.loop.body.len - 1)
-    return
-  of nk_var_assign:
-    label = "VariableAssignment"
-    echo prefix & branch & label
-
-    echo newPrefix & "├─ Target"
-    printAST(node.var_assignment.identifier, newPrefix & "│  ", true)
-
-    if node.var_assignment.new_value != nil:
-      echo newPrefix & "└─ Value"
-      printAST(node.var_assignment.new_value, newPrefix & "   ", true)
-    return
-  of nk_return:
-    label = "Return"
-    echo prefix & branch & label
-    if node.val != nil:
-      echo newPrefix & "└─ Value"
-      printAST(node.val, newPrefix & "   ", true)
-    return
-  of nk_index:
-    label = "IndexAccess"
-    echo prefix & branch & label
-
-    if node.access.target != nil:
-      echo newPrefix & "├─ Target"
-      printAST(node.access.target, newPrefix & "│  ", true)
-
-    if node.access.index != nil:
-      echo newPrefix & "└─ Index"
-      printAST(node.access.index, newPrefix & "   ", true)
-
-    return
-  echo prefix & branch & label
-  for i, child in node.children:
-    printAST(child, newPrefix, i == node.children.len - 1)
-
-  if node.kind == nk_operation:
-    if node.operation.left != nil:
-      printAST(node.operation.left, newPrefix, node.operation.right == nil)
-    if node.operation.right != nil:
-      printAST(node.operation.right, newPrefix, true)
   
 proc new_unary_operation(op: string, left: ref ASTNode, p: ref ASTNode): ref ASTNode =
   let n = new_node(p,nk_operation)
@@ -410,9 +280,14 @@ type
 func current_token(c: TransformerContext): JulianneToken =
   return c.tokens[c.idx]
 
+func advance_token(c: var TransformerContext): JulianneToken =
+  let cur = c.current_token()
+  c.idx += 1
+  return cur
+
 proc match_kind(ctx: var TransformerContext, kind: TokenKind): bool = 
   if ctx.idx < ctx.tokens.len and ctx.tokens[ctx.idx].kind == kind: 
-    ctx.idx += 1 
+    discard ctx.advance_token()
     return true 
   else: 
     return false
@@ -452,41 +327,34 @@ proc parse_base_primary*(ctx: var TransformerContext, expect_unary: bool): ref A
   if ctx.idx >= ctx.tokens.len:
     raise newException(ValueError, "Unexpected end of input")
 
-  let tok = ctx.current_token()
+  let tok = ctx.advance_token()
 
   case tok.kind
   of tk_int_literal:
-    ctx.idx += 1
     return new_lit(parseInt(tok.text), nil)
   of tk_fl_literal:
-    ctx.idx += 1
     return new_lit(parseFloat(tok.text), nil)
   of tk_var_identifier, tk_const_identifier:
-    ctx.idx += 1
     return new_ident(tok.text, nil)
   of tk_operator:
     if expect_unary:
-      ctx.idx += 1
       let operand = parse_primary(ctx,true)
       return new_unary_operation(tok.text, operand, nil)
     else:
         raise newException(ValueError, "Unexpected operator: " & tok.text)
   of tk_paren_open:
-    ctx.idx += 1
     let expression = parse_expression(ctx,0,true)
     match_kind_err(ctx,tk_paren_close,"Expected closing ')'")
     return expression
   of tk_bracket_open:
-    ctx.idx += 1
     var elements: seq[ref ASTNode] = @[]
     while ctx.idx < ctx.tokens.len and ctx.current_token().kind != tk_bracket_close:
       elements.add(parse_expression(ctx,0,true))
       if ctx.current_token().kind == tk_comma:
-        ctx.idx += 1
+        discard ctx.advance_token()
     match_kind_err(ctx,tk_bracket_close,"Expected closing ']' for array")
     return new_lit(ArrayLiteral(elements: elements), nil)
   of tk_string_normal,tk_string_raw,tk_string_formatted:
-    ctx.idx += 1
     return new_lit(tok.text,nil)
   else:
     raise newException(ValueError, "Unexpected token: " & $tok.kind)
@@ -502,14 +370,14 @@ proc parse_postfix(
 
     case tok.kind
     of tk_bracket_open:
-      ctx.idx += 1
+      discard ctx.advance_token()
       let idx_expr = parse_expression(ctx, 0, true)
       match_kind_err(ctx, tk_bracket_close, "Expected ']' after index expression")
 
       let id_access = new_index_access(expression, idx_expr, nil)
       expression = id_access
     of tk_paren_open:
-      ctx.idx += 1
+      discard ctx.advance_token()
       var args: seq[ref ASTNode] = @[]
       while ctx.idx < ctx.tokens.len and ctx.current_token().kind != tk_paren_close:
         args.add(parse_expression(ctx, 0, true))
@@ -552,10 +420,9 @@ proc parse_expression*(
 proc parse_var_decl*(
     ctx: var TransformerContext
 ): ref ASTNode =
-  let var_type = ctx.current_token().text # start using this var_type for consts vs privs vs immutables later
-  ctx.idx += 1
-  let identifier = ctx.current_token().text
-  ctx.idx += 1
+  let var_type = ctx.advance_token().text
+  let identifier = ctx.advance_token().text
+
   match_kind_err(ctx,tk_assign,"Missing equals sign for variable declaration")
   let exp = parse_expression(ctx,0,true)
   let variable = new_var(identifier,exp,nil)

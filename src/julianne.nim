@@ -2,7 +2,7 @@ include parser
 include tokenizer
 import argparse
 import os, sequtils, std/strutils
-include ast/ast
+include ast_validator
 
 proc extract_file_contents(filename: string): string =
   try:

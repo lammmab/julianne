@@ -1,5 +1,5 @@
 if (test) {
-    print("Works!")
+    let x = 3 + -2;
 } else {
     print("Doesn't work. Sucks to suck.")
 }
